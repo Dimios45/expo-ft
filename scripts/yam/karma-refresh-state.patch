@@ -1,0 +1,83 @@
+diff --git a/src/openpi_control/cli.py b/src/openpi_control/cli.py
+index d0aa631..85c3178 100644
+--- a/src/openpi_control/cli.py
++++ b/src/openpi_control/cli.py
+@@ -1636,6 +1636,7 @@ def run_rollout(
+                     num_episodes=0,
+                     finalize=False,
+                     save_on_interrupt=True,
++                    refresh_states_after_poll=True,
+                     max_state_age_s=MAX_STATE_AGE_S,
+                     command_limits=limits,
+                 )
+diff --git a/src/openpi_control/record.py b/src/openpi_control/record.py
+index 0bd7e8f..8b2846c 100644
+--- a/src/openpi_control/record.py
++++ b/src/openpi_control/record.py
+@@ -437,6 +437,7 @@ def record_session(
+     episode_controls: EpisodeControlHints | None = None,
+     finalize: bool = True,
+     save_on_interrupt: bool = False,
++    refresh_states_after_poll: bool = False,
+     command_limits: Mapping[str, tuple[np.ndarray, np.ndarray]] | None = None,
+ ) -> RecordResult:
+     """Drive the arms from ``source`` and write episodes to ``sink``.
+@@ -544,6 +545,14 @@ def record_session(
+             if on_tick is not None:
+                 on_tick(states)
+             step = source.poll(states)
++            if refresh_states_after_poll:
++                # A policy source can block on HTTP inference. Its pre-poll
++                # snapshot may have expired while the arm keeps publishing.
++                # Re-read before freshness validation and dataset construction;
++                # genuine stale telemetry must still fail the check below.
++                states = {
++                    name: getattr(arm, "latest_state", None) for name, arm in arms.items()
++                }
+ 
+             if step.event is EpisodeEvent.STOP:
+                 ended_by = "source stopped"
+diff --git a/tests/test_record.py b/tests/test_record.py
+index f47e0d8..b19241b 100644
+--- a/tests/test_record.py
++++ b/tests/test_record.py
+@@ -53,6 +53,39 @@ from openpi_control.types import (
+ FAST = {"fps": 1000}  # keep the loop's sleeps out of the test runtime
+ 
+ 
++@pytest.mark.parametrize("refresh", [False, True])
++@pytest.mark.parametrize("telemetry_stops", [False, True])
++def test_blocking_source_refreshes_state_without_bypassing_stale_guard(
++    monkeypatch, refresh, telemetry_stops
++):
++    clock = [100.0]
++    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
++    arm = FakeArm()
++    sink = MemorySink()
++
++    class BlockingSource:
++        calls = 0
++
++        def poll(self, states):
++            self.calls += 1
++            if self.calls == 1:
++                clock[0] += 1.0  # simulate HTTP latency without sleeping
++                if telemetry_stops:
++                    arm.age_s = 5.0
++                return TeleopStep(targets={"left": target()}, event=EpisodeEvent.START)
++            if self.calls == 2:
++                return TeleopStep(event=EpisodeEvent.SAVE)
++            return TeleopStep(event=EpisodeEvent.STOP)
++
++    result = record_session(
++        arms={"left": arm}, source=BlockingSource(), sink=sink, task="test",
++        fps=1000, refresh_states_after_poll=refresh, report=lambda message: None,
++    )
++    expected = int(refresh and not telemetry_stops)
++    assert result.frames == expected
++    assert len(arm.commands) == expected
++
++
+ class FakeArm:
+     """The seam the record loop actually depends on: capabilities, state, command.
+ 

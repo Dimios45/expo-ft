@@ -15,3 +15,14 @@ assets/
 client/.venv/
 
 log/
+# Local conversion environments and large offline artifacts.
+.venv-convert
+artifacts/
+
+# Local YAM rollout datasets and evaluation recording symlink.
+/round-[0-9]*/
+/expo-ft-jax-rollouts-*
+
+# Local test and lint caches.
+.pytest_cache/
+.ruff_cache/

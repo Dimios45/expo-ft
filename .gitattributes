@@ -1,0 +1,2 @@
+# Unified diff context lines require a leading space, including blank lines.
+/scripts/yam/karma-refresh-state.patch whitespace=-blank-at-eol,-blank-at-eof

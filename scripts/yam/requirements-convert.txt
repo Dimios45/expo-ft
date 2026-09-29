@@ -1,0 +1,19 @@
+# Install torch==2.7.1 separately from https://download.pytorch.org/whl/cpu.
+jax[cuda12]==0.5.3
+flax==0.10.2
+orbax-checkpoint==0.11.13
+numpy<2
+jaxtyping==0.2.36
+beartype==0.19.0
+equinox==0.11.12
+ml-dtypes==0.4.1
+tensorstore==0.1.74
+transformers==4.53.2
+augmax
+einops
+etils
+safetensors
+sentencepiece
+pillow
+pytest
+fsspec[gcs]

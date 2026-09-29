@@ -1,0 +1,4 @@
+# Install into the persistent venv-jax environment after serving dependencies.
+optax==0.2.8
+pyarrow>=18,<26
+av>=14,<19

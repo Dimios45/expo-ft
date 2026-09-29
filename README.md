@@ -14,6 +14,20 @@ To determine which is best for your task, use the following criteria:
 - If your forward pass does not fit inside a control step and your task needs the policy to be reactive to changes in the environment, use [Real-Time EXPO-FT](#running-real-time-expo-ft).
 
 
+## Bimanual YAM cloth folding on an RTX 4090
+
+For the Karma client and single-GPU YAM experiment, start with the
+[cloth-folding guide](docs/cloth-folding.MD). It contains the NUC recording,
+dataset transfer, conservative EXPO training, validation, and server commands,
+plus the active parameters and implementation details. This workflow freezes
+the base π₀.₅ model and trains the critic, visual encoder, and bounded action
+editor between episodes.
+
+See the [documentation index](docs/README.md) for conversion instructions,
+validation reports, historical experiments, and the source-control checklist.
+The DROID setup and paper experiment instructions below describe the upstream
+workflows; the YAM guide documents its separate environment and HTTP client.
+
 ## Setup
 
 The repo has **two independent Python environments**:

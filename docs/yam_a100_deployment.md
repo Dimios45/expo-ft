@@ -1,17 +1,18 @@
 # YAM JAX on the A100 pod, KARMA on the NUC
 
-The active experiment is `artifacts/yam-expo` on this pod. Tokenizer and model
-assets are installed. Multiple robot episodes have been collected and trained;
-use `bash scripts/yam/pod_expo.sh status` to read the current version. The server
-runs in tmux session `yam-expo` at `127.0.0.1:8204` when started, and is stopped
-during training. All 25 targeted tests passed after the A100 execution changes.
-The initialization commands below are only for a new experiment; do not repeat
-init on the existing directory. Read [the real-time roadmap](yam_realtime_plan.md)
-for the planned streaming workflow; current collection is episode-wise.
+This guide covers model/environment installation and the **earlier manual**
+record → SCP → train → restart workflow. For automatic episode uploads,
+concurrent learning and boundary policy updates, use the
+[online runbook](yam_online_runbook.md).
 
-For **collect → transfer → EXPO train**, use the round workflow below rather
-than the standalone inference launcher later in this document. The round
-server records the policy/session identity required by the dataset importer.
+The 2026-10-03 online experiment is concluded and all pod services are stopped.
+Its final registry is `artifacts/yam-online-base/learner`, ending at version 6;
+[the results report](yam_online_results.md) records its outcomes and measurements.
+The `artifacts/yam-expo` paths below refer to the earlier sequential experiment,
+not that fresh online run. Their version numbers must not be mixed.
+Initialization commands are only for a new directory. In the manual workflow,
+serving and training hold the same exclusive experiment lock and cannot overlap.
+The online workflow uses separate serving/learner registries instead.
 
 ## One-episode EXPO workflow
 

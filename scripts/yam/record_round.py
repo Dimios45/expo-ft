@@ -22,11 +22,26 @@ def health(server):
     return result
 
 
+def require_saved_episode(folder, returncode):
+    if returncode != 0:
+        raise RuntimeError('KARMA exited with an error; collection stopped. Inspect local files before labeling or retrying.')
+    info_path = folder / 'meta/info.json'
+    manifest_path = folder / 'openpi_control_rollouts.json'
+    if not info_path.exists() or not manifest_path.exists():
+        raise RuntimeError('KARMA did not finalize an episode; no outcome label requested')
+    info = json.loads(info_path.read_text())
+    manifest = json.loads(manifest_path.read_text())
+    saved = [e for e in manifest.get('episodes', []) if e.get('saved')]
+    if info.get('total_episodes', 0) != 1 or info.get('total_frames', 0) < 1 or len(saved) != 1:
+        raise RuntimeError('KARMA saved no complete episode record; no outcome label requested')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--server", required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--seconds", type=float, default=300)
+    p.add_argument("--auto-upload", action="store_true", help="Parent runner manages episode upload")
     p.add_argument("karma_args", nargs=argparse.REMAINDER)
     args = p.parse_args()
     extra = args.karma_args
@@ -92,19 +107,19 @@ def main():
         *extra,
     ]
     process = subprocess.Popen(command)
-    try:
-        returncode = process.wait()
-    except KeyboardInterrupt:
-        print(
-            "Waiting for Karma to finish saving the interrupted episode...", flush=True
-        )
-        returncode = process.wait()
+    while True:
+        try:
+            returncode = process.wait()
+            break
+        except KeyboardInterrupt:
+            print(
+                "Waiting for Karma to finish shutdown and saving; answer its outcome prompts...", flush=True
+            )
+    require_saved_episode(args.out, returncode)
     after = health(args.server)
     for key in ("experiment_id", "policy_version", "session_id"):
         if before[key] != after[key]:
             raise RuntimeError("Server changed during episode; recording not admitted")
-    if not (args.out / "meta/info.json").exists():
-        raise RuntimeError("Karma did not save a dataset")
     label = input("Task success reward [0/1]: ").strip()
     if label not in ("0", "1"):
         raise ValueError("Reward must be 0 or 1")
@@ -135,7 +150,8 @@ def main():
     print(
         "Saved versioned episode:",
         args.out,
-        "Transfer this entire folder to the GPU host before ingest/train.",
+        "The online runner will upload this episode automatically." if args.auto_upload
+        else "Transfer this entire folder to the GPU host before ingest/train.",
     )
 
 

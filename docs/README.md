@@ -1,70 +1,58 @@
 # YAM documentation
 
-For the current A100 pod, start with [A100 deployment and collection](yam_a100_deployment.md).
-The active experiment is `/workspace/expo-ft/artifacts/yam-expo`; its
-`current.json` and version manifests are authoritative. Stable EXPO trains the
-critic, visual encoder, action editor, and temperature while preserving the base.
+The A100/YAM experiment concluded on 2026-10-03. **Training and all pod serving
+services are stopped.** Start with the [online runbook](yam_online_runbook.md)
+for the implemented system and [final results](yam_online_results.md) for evidence.
+Nothing in these documents authorizes restarting the closed experiment.
 
-[Real-time YAM roadmap](yam_realtime_plan.md) compares the two papers with the
-current implementation and specifies the NUC/A100 streaming, latency, scheduling,
-and replay work still needed. It is a design, not an already deployed live learner.
-
-[Cloth folding on the RTX 4090 and YAM NUC](cloth-folding.MD) documents a separate
-earlier experiment whose version numbers and machine paths do not apply to the
-A100 run. Do not mix the two experiment registries.
+The final run used `artifacts/yam-online-base/{serve,learner}`, started from
+base-only version 0 with empty replay, and completed six training rounds through
+version 6. Its base weights stayed frozen. `STOPPED.json` blocks coordinator
+restart. Checkpoints and recordings are local artifacts, not included in Git.
 
 ## Guides and evidence
 
-For the separate hoodie recording, see [T-shirt / hoodie bootstrap](tshirt-expo.md).
-
-| Document | Purpose |
+| Document | Scope |
 | --- | --- |
-| [A100 deployment](yam_a100_deployment.md) | Current pod, SSH tunnel, recording, transfer, train, and restart commands |
-| [A100 round 1](yam_a100_round1_results.md) | Measured parallel sampling speedup, VRAM, and first-round validation |
-| [Real-time roadmap](yam_realtime_plan.md) | Paper comparison, WebSocket design, delayed action execution, live replay, and one-GPU scheduling |
-| [Cloth-folding guide](cloth-folding.MD) | Earlier 4090 experiment, training equations, code map, and limitations |
-| [Checkpoint conversion](yam_checkpoint_conversion.md) | Offline weight conversion and model-loading validation |
-| [Conversion results](yam_conversion_results.md) | Recorded numerical parity checks and serving conventions |
-| [Stability review](yam_expo_stability_plan.md) | Historical diagnosis and proposal for the conservative restart |
-| [Initial stability results](yam_expo_stability_results.md) | Offline evidence from the stable restart using `round-0000` |
-| [Round 2 results](yam_expo_round2_results.md) | Failure replay, continuity checks, and HTTP validation for version 2 |
-| [Initial runner guide](yam_expo_rounds.md) | Historical workflow; use `continue_stable.py` from the cloth-folding guide for current training |
-| [Initial implementation checks](yam_expo_test_results.md) | Historical checks before the stable workflow; not current deployment status |
+| [Online runbook](yam_online_runbook.md) | Fresh setup, NUC prompts, automatic uploads, learner queue, policy leases, interruptions and recovery |
+| [Online results](yam_online_results.md) | Six episodes/updates, behavior versions, VRAM/timing, timeout and final shutdown |
+| [RTC roadmap](yam_realtime_plan.md) | Paper comparison, implemented sampler, missing RTC alignment and deadline work |
+| [A100 deployment](yam_a100_deployment.md) | Environment/model installation and historical manual round commands |
+| [A100 round 1](yam_a100_round1_results.md) | Earlier sequential run's sampling speedup, VRAM and first-round validation |
+| [Cloth folding](cloth-folding.MD) | Separate earlier RTX 4090/YAM experiment; different paths and versions |
+| [T-shirt / hoodie bootstrap](tshirt-expo.md) | Separate offline recording and bootstrap workflow |
+| [Checkpoint conversion](yam_checkpoint_conversion.md) | Offline conversion and model-loading validation |
+| [Conversion results](yam_conversion_results.md) | Numerical parity and serving conventions |
+| [Stability review](yam_expo_stability_plan.md) | Historical conservative-restart diagnosis and proposal |
+| [Initial stability results](yam_expo_stability_results.md) | Earlier offline stable-restart evidence |
+| [Round 2 results](yam_expo_round2_results.md) | Earlier failure replay and HTTP validation |
+| [Initial runner](yam_expo_rounds.md) | Historical initial EXPO runner; not the current online coordinator |
+| [Initial checks](yam_expo_test_results.md) | Historical implementation tests |
 
-Reports preserve what was measured at their respective checkpoints. They do not
-establish a controlled success rate or guarantee that later checkpoints behave
-the same way.
+Older reports preserve the configuration and evidence at their own checkpoints.
+They are not instructions to merge experiment registries or claims of current
+service availability. Neither training loss nor numerical validation establishes
+physical safety or a controlled improvement in task success.
 
-## Commit the implementation and documentation
+## Source-control handoff
 
-For the A100 changes, stage only the implementation, tests, and documentation
-listed below. These commands do not run training or connect to hardware.
+One commit can include all current source, tests and documentation changes:
 
 ```bash
 cd /workspace/expo-ft
-
-git add -- \
-  README.md docs/README.md \
-  docs/yam_a100_deployment.md docs/yam_a100_round1_results.md docs/yam_realtime_plan.md \
-  expo_ft/yam/base.py expo_ft/yam/rounds.py expo_ft/yam/stable.py \
-  scripts/yam/continue_stable.py scripts/yam/check_http.py \
-  scripts/yam/download_pod_assets.sh scripts/yam/measure_gpu.py \
-  scripts/yam/pod_expo.sh scripts/yam/run_pod_server.sh \
-  tests/test_yam_stability.py tests/test_yam_published_checkpoint.py
-
+git add -- README.md docs/ expo_ft/yam/ scripts/yam/ tests/
 git diff --cached --check
 git diff --cached --stat
-git diff --cached --name-only
+git commit -m "Add YAM online episode collection and frozen-base EXPO training" \
+  -m "Stream resumable episode uploads over WebSocket, train accumulated replay, and publish policies between supervised episodes. Add recovery checks, RTC sampler validation, and the completed A100 experiment runbook and results."
 ```
 
-Review the staged files, then commit if they are the intended changes:
-
-```bash
-git commit -m "Add A100 YAM EXPO workflow, parallel training, and realtime roadmap"
-```
+Review `git diff --cached` when other work is staged. These commands stage the
+current source changes; they do not start services, move the robot, or push Git.
+No commit is created by the documentation task itself.
 
 The root `.gitignore` excludes `artifacts/`, `logs/`, `.venv-convert`, the nested
-OpenPI checkout, and generated caches. Thus model weights, replay, rollout videos,
-tokenizers, and measured run logs are not included. HF credentials are outside
-this repository and are not staged by these commands. Preserve trained versions
-and data separately: a source commit is not a model or dataset backup.
+OpenPI checkout and generated caches. Model weights, replay, rollout videos,
+tokenizers and raw measurement logs are therefore excluded. HF credentials live
+outside the repository. Preserve data/checkpoint backups separately; a source
+commit cannot reconstruct the trained policy or restore uploaded videos.

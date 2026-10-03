@@ -1,198 +1,136 @@
-# YAM NUC + A100: from episode-wise EXPO to real-time EXPO-FT
+# YAM Real-Time EXPO-FT: implemented pieces and remaining work
 
-Status: design and implementation plan, reviewed 2026-10-03. The working YAM
-path remains sequential: record one episode, transfer it, stop inference,
-prepare replay, train, validate, restart. Live concurrent learning is not yet
-implemented for KARMA. The next immediate rollout uses stable frozen-base RL;
-the requested all-weights experiment follows that rollout in a separate branch.
+Status, 2026-10-03: the hardware experiment is concluded and all pod services are
+stopped. The implemented operational workflow is **delayed online EXPO with a
+frozen base**, automatic episode uploads and policy changes between episodes.
+It supports collection/training overlap but does not promise action deadlines.
+Use the [online runbook](yam_online_runbook.md) for commands and
+[final results](yam_online_results.md) for measured outcomes.
 
-## What the two papers contribute
+## Paper recipe versus this deployment
 
-[EXPO-FT v2](https://arxiv.org/html/2605.25477v2) combines chunk-level critics,
-bounded action edits, candidate ranking, and supervised base-policy updates.
-Its appendix uses task-specific LoRA initialization and freezes the base image
-encoder during RL. Thus “full VLA fine-tuning” in its motivation should not be
-read as proof that every backbone parameter is optimized in the reported recipe.
+[EXPO-FT v2](https://arxiv.org/html/2605.25477v2) combines chunk critics, bounded
+edits, candidate ranking and supervised base-policy updates. Its appendix uses
+LoRA initialization and freezes the base image encoder during RL. Its description
+of VLA fine-tuning should not be read as a requirement to optimize every weight.
 
 [Real-Time EXPO-FT v1](https://arxiv.org/html/2609.18207v1) separates delayed VLA
-candidate generation from editing/ranking with the latest observation. It adds
-prefix-conditioned training/sampling, delay-aware backups, and a noise-Q filter
-that avoids denoising every backup candidate. Its base update uses successful
-episodes and a LoRA-based parameterization, with trainable vision/projection
-components. That differs from both our frozen-base experiment and a literal
-all-parameter update. Changing HTTP transport alone does not implement this
-algorithm. These are paper findings; the engineering choices below are proposed
-adaptations for this robot, checkpoint, network, and single GPU.
+sampling from fresh-observation editing/ranking. It includes committed-prefix
+conditioning, delay-aware backups and a noise-Q filter. Appendix VII-E starts
+learning after ten completed episodes and flushes accumulated updates at episode
+boundaries. Its reference uses 32 base candidates and 32 edits, batch size 64,
+UTD 20, and success-only base updates with language LoRA plus other trainable
+components. Updating during execution on a single GPU is an additional systems
+extension, not the reported scheduling recipe.
 
-## Reuse and missing pieces
+Our run instead began learning after the first episode, used stable-v2's
+conservative schedule, and kept the base frozen. The earlier all-weights request
+was superseded; no all-weights or LoRA update was performed. Existing recorded
+success labels do not retroactively make this an implementation of the full
+paper recipe.
 
-| Existing code | Reuse | Work still needed for YAM |
-|---|---|---|
-| `expo_ft/agents/alg/realtime_expo_ft.py` | Delayed critic/filter/editor algorithm | Adapt input keys, 14-D joint actions, normalization and replay |
-| `expo_ft/agents/vla/pi05.py` | Prefix-conditioned loss and sampling wrappers | Load the converted checkpoint without DROID transforms |
-| OpenPI `pi0.py` | Prefix-aware sampler and rematerialized model blocks | Verify sampler against current source-frame adapter |
-| `train_pi_robo_async.py` | Chunk scheduling and immutable parameter publication ideas | Its device split assumes inference on device 0 and learner on other devices; one A100 needs a new scheduler |
-| `client/run_client.py` | Existing outbound WebSocket transport | It is an environment RPC client, not a drop-in KARMA policy client |
-| `expo_ft/yam/*` | Verified camera/state/gripper conversion, saved processing assets, stable learner, version registry | Streaming aligned replay, delayed observations, filter critic, live updates |
-| KARMA | Local robot control, bounds, cameras, interventions, LeRobot recording | Nonblocking transport worker, action buffer and execution acknowledgments |
+## Implementation map
 
-Keep the 14-D YAM joint/gripper frame and three-camera preprocessing. Do not
-copy DROID's 7-D Cartesian actions, two-view assumptions, or task horizons into
-the current checkpoint configuration.
+| Component | Implemented | Remaining |
+| --- | --- | --- |
+| YAM preprocessing | 14-D joint/gripper frame, three cameras, saved normalization | Preserve parity in future optimized transport |
+| Streaming transport | Binary MessagePack WebSocket over SSH, diagnostic journal, hardware bridge | Deadline-aware plans and direct binary-image encoding |
+| Online collection | Ten-episode runner, operator prompts/labels, resumable background archive uploads | Per-tick execution/observation streaming |
+| Replay and training | Episode queue, older-policy provenance checks, frozen-base caches, critic/editor/temperature updates | Fresh/delayed observation alignment, executed prefixes and filter critic |
+| Publication | Completed checkpoint checks and one collector lease; changes between episodes | Crash recovery and richer behavior validation |
+| Prefix sampler | `rtc_sampling.py`, exact prefix preservation and zero-delay parity checked | Meet end-to-end deadlines and integrate with the executor |
+| Base adaptation | Not implemented for this online path | Success-only prefix loss, LoRA initialization, optimizer/export validation |
 
-## Recommended communications
+`expo_ft/agents/alg/realtime_expo_ft.py` and `expo_ft/agents/vla/pi05.py` contain
+upstream algorithm and prefix-training components. `train_pi_robo_async.py`
+assumes a device split with inference and learning on different GPUs. The
+upstream environment client is DROID-oriented, not a drop-in KARMA client.
+Repository defaults also differ from the paper's reference settings; they must
+be made explicit when adapting the learner.
 
-Start with a persistent binary WebSocket connection initiated by the NUC,
-with MessagePack metadata and binary JPEG/array payloads. WebSocket supports
-bidirectional framed messages over TCP ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)).
-Use the existing SSH tunnel for the first implementation; then benchmark direct
-authenticated WSS or a private network against it before changing connectivity.
+## Latency budget
 
-Use a separate connection for bulk recording upload. Large video transfers must
-not queue ahead of time-sensitive observations and action replies. Two channels
-inside one SSH connection still share its underlying transport; separate tunnels
-or separate WSS connections should be measured under packet loss and load.
+The tested checkpoint has horizon H=30. The current upstream slicing adapter
+requires `delay <= C`, `2*C <= H`, and sufficient output positions for delay+C.
+A five-tick delay allows 167 ms at 30 Hz; an eight-tick window allows 267 ms.
+The shared-cache sampler took roughly 963–980 ms for 32 candidates before
+network or Q/editor processing. The hardware network added seconds in the
+recorded-observation smoke test. This configuration cannot satisfy the proposed
+RTC timing budget.
 
-| Option | Proposed use |
-|---|---|
-| Binary WebSocket | First choice: matches repository experience and allows observations, plans, acknowledgments, and labels in both directions |
-| gRPC bidirectional streaming | Good alternative if generated schemas, service boundaries, and RPC tooling are priorities; [gRPC supports bidirectional streams](https://grpc.io/docs/what-is-grpc/core-concepts/) |
-| Current HTTP keep-alive | Baseline for latency comparisons and existing sequential rollout |
-| UDP/QUIC-based application protocol | Revisit only if measurements show TCP recovery dominates; would require explicit ordering, expiry, retransmission, authentication, and failure behavior |
+Sequential chunk execution can still work with pauses, as the hardware run
+demonstrated. Do not describe that as uninterrupted real-time execution. Larger
+windows, slower control, fewer candidates or altered precision are adaptations
+that need explicit validation, not silent substitutes for the reported recipe.
 
-WebSocket reduces transport ceremony; it does not remove WAN round-trip time or
-the model's compute latency. The motor-control loop stays local on the NUC.
+Priority measurements:
 
-## Proposed data contract
+1. Reduce payload overhead and benchmark image resizing/encoding against the
+   validated preprocessing. Current inference envelopes contain JSON/base64.
+2. Optimize the shared-cache sampler and precompile fixed shapes. The validated
+   base path is FP32; BF16 requires renewed numerical and behavior checks.
+3. Measure NUC capture-to-execution latency under uploads and gradient load,
+   including buffer underruns and request deadlines.
+4. If network latency dominates, compare a nearer GPU or suitable local inference
+   hardware. A different RPC framework alone does not remove WAN latency.
 
-Negotiate protocol/schema versions and units at connection setup. Every record
-needs experiment ID, episode ID, policy version/hash, and sequence number.
+## Required RTC replay contract
 
-- Observation: NUC monotonic capture time, execution tick, 14-D state, camera
-  role/timestamp/encoding, current plan ID, consumed offset, committed action
-  prefix, and locally measured remaining-buffer time.
-- Candidate/plan: originating observation ID, policy version, intended execution
-  start tick, action horizon, valid-until tick, 14-D absolute targets, committed
-  prefix identity, and server queue/compute durations.
-- Execution acknowledgment: actual applied targets after clipping, actual joint
-  state, observation IDs, plan/action indices, intervention mask, and timestamps.
-- Episode close: success/failure/truncation, reward source, authoritative label,
-  final executed tick, and durable-recording hash.
+Every observation/plan/execution record needs experiment and episode IDs,
+sequence/tick IDs and policy hashes. Store both delayed base observations and
+fresh editor observations, the committed action prefix, intended execution tick,
+actual applied commands after limits/interventions, timestamps, terminal labels
+and rewards. Finalize only executed action windows. Nominal LeRobot timestamps
+and arbitrary fixed windows cannot reconstruct missing delay alignment.
 
-Do not compare unsynchronized wall clocks to infer one-way latency. Use NUC-local
-request/response timing, server-local durations, monotonic tick IDs, and measured
-clock-offset uncertainty if cross-host timestamps are required.
+Use NUC monotonic durations for end-to-end timing and server-local durations for
+compute. Do not subtract unsynchronized wall clocks as though they were one-way
+latency. Replace stale pending observations, but durably retain executed-action
+records and labels. Reject expired, wrong-episode or wrong-version plans and use
+KARMA's defined local stop behavior on underrun.
 
-At most one pending replaceable observation per robot; new observations replace
-stale queued ones. Executed actions and labels require durable append/acknowledge
-and deduplication, not dropping. Reconnection must not re-execute old plans.
-Reject stale, wrong-episode, out-of-order, or expired actions. On buffer underrun,
-invoke KARMA's defined local hold/stop behavior rather than repeat a stale chunk.
+Human rewards arrive at episode end. Live uploads do not supply earlier rewards;
+training during collection uses previously finalized episodes. Provisional
+transitions would need an explicit correction strategy rather than fabricated
+failure rewards.
 
-## Latency is currently the main constraint
+## Single-GPU scheduling and model publication
 
-Measured trained-policy inference is approximately 0.94 seconds on localhost,
-before NUC camera/encoding time and WAN transport. At 30 Hz this is about 29
-control ticks of delay. The current predicted horizon is 30 ticks. This leaves
-almost no useful budget for a delayed pipeline, regardless of transport choice.
+The implemented experiment uses separate inference and learner processes with
+JAX preallocation disabled. This enables overlap but gives no GPU priority or
+latency guarantee. Candidate preparation loads a second frozen base and used
+more memory than EXPO gradient updates. Measurements are in the results report.
 
-Choose execution window C and committed prefix d from measured end-to-end p99
-latency, including concurrent learning. The selected prefix sampler must have
-enough output positions for both the prefix and the executed suffix; for the
-current fixed-H slicing design require d + C <= H and d <= C. With H=30 and
-d around 29, these conditions cannot both hold. Simply enabling KARMA prefetch
-does not solve this. A proposed initial target is C=8, with d<=8 only if total
-p99 latency plus margin fits under 8/30 seconds. This is a target, not a measured
-capability or a reason to silently alter the checkpoint horizon.
+A deadline-aware implementation should admit small training units according to
+measured execution-buffer slack, keep disk/network work outside the GPU critical
+path, and use immutable inference snapshots. Python threads, MPS or memory caps
+alone do not establish kernel preemption or deadline guarantees. Base-gradient
+steps may need episode-boundary scheduling even if small critic updates overlap.
 
-Priority optimizations to benchmark:
+## Transport alternatives
 
-1. Reuse the VLM prefix/KV cache across noise candidates; current four-way vmap
-   improves throughput but does not explicitly compute the prefix just once.
-2. Precompile fixed camera, prefix, candidate, and batch shapes before robot use.
-3. Benchmark candidate count and inference precision on identical recorded
-   inputs. The current validated path remains FP32; earlier BF16 parity failed.
-4. Separate delayed base generation from fresh-observation critic/edit selection.
-5. Train a backup noise filter to avoid full candidate-pool regeneration for
-   every streaming update. Refresh cached candidates when base weights change.
-6. Measure NUC-to-A100 latency under simultaneous upload and gradient execution.
-   If WAN jitter prevents the deadline, move fast editing/control inference to
-   a suitable local GPU or move the inference GPU closer to the robot.
+Persistent binary WebSocket is implemented and interoperates with the existing
+SSH access. gRPC streaming is a reasonable alternative for typed service APIs,
+but no comparative latency benchmark was performed. Direct authenticated WSS or
+a private network could be compared with SSH. Separate upload and action
+connections avoid one application queue, but tunnels on the same SSH connection
+still share TCP congestion and recovery. QUIC/UDP would require additional
+ordering, expiry and reliability design; it is not an established fix here.
 
-## One A100 serving and learning
+## Diagnostics and acceptance checks
 
-Use one GPU-owning process with immutable inference snapshots, a bounded replay
-ingestion queue, and a scheduler that admits small training units only when the
-action-buffer deadline permits. Keep video encoding, durable replay writes, and
-network I/O outside the GPU critical path. Model versions are swapped atomically
-at chunk boundaries; requests must never see partly updated parameters.
+- `rtc_transport.py probe`: synthetic payload round trips; no cameras/GPU.
+- `make_rtc_fixture.py` + `rtc_transport.py infer`: recorded-state/camera
+  inference, returned-action shape and finite checks; no robot commands.
+- `check_rtc_sampling.py`: committed-prefix preservation, zero-delay parity,
+  32-candidate timing. Its deployment-ready field remains false.
+- `check_online_loop.py`: historical pod-only upload/train/reload integration
+  probe. It targets the older overlap workspace and existing recordings; it is
+  not the hardware runner and must not be launched during a collection session.
+- `overlap_once.py`: historical one-shot pilot, superseded by `online_server.py`.
 
-Python threads do not guarantee GPU deadline priority. Measure worst-case update
-duration and interference first. If a training unit cannot fit into the available
-slack, defer it. Full-backbone gradients may need to remain episode-boundary work
-on a single GPU while smaller critic/editor updates run during rollout. Two GPU
-processes, MPS, or memory limits alone do not establish scheduling guarantees.
-
-Existing measurements are from separate phases: roughly 14 GiB serving/preparation
-and up to 5.8 GiB stable RL training. They are not a concurrent benchmark. Literal
-FP32 all-weight Adam training has an approximate lower bound of 16 bytes per
-parameter for parameters, gradients, and two moments, before activations,
-temporary buffers, and an inference snapshot. Count actual model parameters and
-measure a dry training step before reserving the remainder of the 80 GB device.
-Disk must also accommodate new weights, optimizer state, rollback versions,
-replay, and videos; this pod has only a 50 GB root filesystem.
-
-Full-weights update and live concurrency are distinct experiments. Preserve the
-original checkpoint and source hashes, export the new base separately, check
-gradient participation across vision/language/action components, and validate
-reloaded inference. A successful flow-loss decrease does not establish robot
-improvement. A changed base also changes candidate distributions seen by the
-existing critic; validate the combined policy before promotion.
-
-## Replay and reward migration
-
-Keep LeRobot videos on the NUC as the durable recording, while streaming aligned
-transitions to the learner. Buffer incomplete chunks and finalize only actually
-executed action windows. Store both delayed base observations and fresh editor
-observations, committed prefixes, execution counts, intervention masks, versions,
-and terminal flags. Discount by actual executed-step count using the declared
-task discount convention.
-
-Human labels currently arrive after each episode. Live streaming alone does not
-make those rewards available sooner. Initially upload transitions during rollout
-but admit reward-complete episodes after the operator label; train online using
-previous finalized episodes. Per-step live learning needs an explicit strategy
-for provisional transitions and correcting terminal labels, or a validated online
-reward source. Do not turn an unfinished episode into a fabricated failure.
-
-Our three historical episodes have nominal frame timestamps and fixed windows.
-They can remain explicitly marked off-policy replay, but cannot be relabeled as
-precisely timed RTC examples: missing committed prefixes, execution timestamps,
-and fresh/delayed observation alignment cannot be recovered by assumption.
-
-## Implementation sequence and acceptance checks
-
-1. **Instrumentation and transport shadow test:** add the KARMA worker and record
-   round-trip p50/p95/p99, queue age, upload contention, executed tick IDs, and
-   buffer depth. Use recorded observations first; no new motion behavior.
-2. **Asynchronous sampling adapter:** preserve the verified YAM mapping, implement
-   committed-prefix sampling and fresh-observation selection; test against a
-   deterministic mock executor with injected delay, jitter, disconnects and resets.
-3. **Prefix training and delayed replay:** adapt the existing algorithm with unit
-   tests for prefix masks, terminal/truncation targets, partial execution and
-   exactly-once admission. Keep explicit versioned schemas separate from v1 replay.
-4. **Concurrent frozen-base learner:** train small critic/editor units on finalized
-   replay while serving. Promote snapshots at chunk boundaries; measure deadline
-   miss rate and stale-plan rejection under load.
-5. **Base updates:** first benchmark the requested all-weights offline update;
-   then decide between that, action-expert updates, and the paper's LoRA recipe
-   using measured memory, latency, and task validation. Add durable optimizer
-   checkpoints and refresh/filter backup candidates when the base changes.
-6. **Robot evaluation:** compare matched initial conditions against the preserved
-   stable policy, logging task success, interventions, motion continuity, buffer
-   underruns and end-to-end latency. Report observations, not inferred success
-   from critic loss or hardware-free tests.
-
-The next implementation milestone is a measured KARMA streaming bridge and
-shadow-mode chunk scheduler, not a claim that the current HTTP server already
-implements Real-Time EXPO-FT.
+Before deploying full RTC, validate timing-aligned replay and prefix masks,
+truncation/terminal targets, stale-plan rejection, reconnect behavior, candidate
+normalization, measured concurrent-update deadlines, and matched-condition
+robot evaluation. The completed online experiment supplies useful infrastructure
+and evidence, not completion of these remaining steps.

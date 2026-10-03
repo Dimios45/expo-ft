@@ -109,3 +109,40 @@ class RoundPolicy:
                 **details,
             )
         return actions
+
+    def reload_candidate(self, training_root):
+        """Called under the HTTP inference lock, only at a coordinator boundary."""
+        root = Path(training_root).resolve()
+        exp, cur = read(root / "experiment.json"), read(root / "current.json")
+        if exp["experiment_id"] != self.exp["experiment_id"] or exp["settings"] != self.exp["settings"]:
+            raise ValueError("Candidate experiment mismatch")
+        if self.cfg.actor_mode != "frozen" or exp["checkpoint"] != self.exp["checkpoint"]:
+            raise ValueError("Hot reload only supports the same frozen base")
+        if cur["version"] <= self.cur["version"]:
+            return self.metadata
+        version = Path(cur["checkpoint"])
+        manifest = validate_version(version)
+        if manifest["version"] != cur["version"] or manifest["settings"] != self.exp["settings"]:
+            raise ValueError("Candidate manifest mismatch")
+        candidate = YamEXPO(self.cfg)
+        candidate.restore(version / "expo.msgpack")
+        # Exercise the real selector before making any state visible.
+        images = np.zeros((1,224,224,9), np.float32)
+        selected, details = candidate.select(images, np.zeros((1,14),np.float32),
+                                            np.zeros((1,self.cfg.candidates,420),np.float32), 77)
+        if not np.isfinite(selected).all() or not np.isfinite(details["q_values"]).all():
+            raise ValueError("Candidate selector produced nonfinite results")
+        if np.max(np.abs(selected)) > self.cfg.edit_scale + 1e-5:
+            raise ValueError("Candidate exceeded edit bound on zero base actions")
+        if self.cfg.mask_gripper_edits and np.any(np.asarray(selected).reshape(30,14)[:,[6,13]] != 0):
+            raise ValueError("Candidate edited grippers")
+        session = uuid.uuid4().hex
+        log = self.root / 'sessions' / session
+        log.mkdir()
+        metadata = dict(self.metadata, expo_enabled=True, policy_version=cur['version'], session_id=session,
+                        policy_checkpoint=str(version), policy_weights_sha256=sha(version/'expo.msgpack'))
+        atomic_json(log/'session.json', metadata)
+        atomic_json(self.root/'current.json', cur)
+        self.learner, self.cur, self.metadata = candidate, cur, metadata
+        self.session, self.log, self.count = session, log, 0
+        return metadata

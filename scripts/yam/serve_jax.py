@@ -43,6 +43,19 @@ def build_app(policy, checkpoint):
     app = FastAPI(title="YAM pi05 JAX server")
     lock = threading.Lock()
 
+    @app.post("/online/reload")
+    def reload_online():
+        # Pod-configured coordinator workspace; no request-controlled paths.
+        if not hasattr(policy, "reload_candidate"):
+            return JSONResponse({"error": "Reload unsupported"}, status_code=400)
+        try:
+            with lock:
+                training_root = os.environ.get('YAM_ONLINE_TRAINING_ROOT', str(ROOT / 'artifacts/yam-overlap-test'))
+                return policy.reload_candidate(training_root)
+        except Exception:
+            LOG.exception("Candidate reload failed; previous policy retained where possible")
+            return JSONResponse({"error": "Candidate reload failed; inspect server log"}, status_code=500)
+
     @app.get("/healthz")
     @app.get("/act")
     def health():

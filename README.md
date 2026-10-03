@@ -16,17 +16,23 @@ To determine which is best for your task, use the following criteria:
 
 ## Bimanual YAM with KARMA on the A100
 
-Start with the [A100 deployment guide](docs/yam_a100_deployment.md) for the
-isolated Python environment, pinned OpenPI revision, NUC SSH tunnel, episode
-recording, transfer, stable EXPO updates, GPU measurements, and serving.
-This YAM workflow trains the critic/editor between episodes with the base frozen.
-It uses `.venv-convert` on the GPU host and KARMA's own environment on the NUC.
-It does not use the DROID client or the upstream setup commands below.
+Use the [online YAM runbook](docs/yam_online_runbook.md) for supervised KARMA
+collection, automatic WebSocket episode uploads, background EXPO learning and
+policy updates between episodes on one A100. The [A100 deployment guide](docs/yam_a100_deployment.md)
+provides model/environment setup and the older manual round workflow. YAM uses
+`.venv-convert` on the GPU host and KARMA's own environment on the NUC, rather
+than the upstream DROID setup below.
 
-The [real-time roadmap](docs/yam_realtime_plan.md) compares both papers and
-describes the streaming and scheduling work still needed for live YAM learning.
-The all-weights update is a separate planned experiment, not part of the current
-frozen-base deployment.
+The 2026-10-03 experiment is **concluded; all pod services are stopped**.
+It started from the original base with empty replay and completed six training
+rounds: 200 critic, 10 editor and 10 temperature updates. Base weights stayed
+frozen. See [final results](docs/yam_online_results.md) for episode outcomes,
+policy versions, timing, VRAM and the timeout/recovery incident.
+
+This deployed path is delayed online EXPO, not the complete paper Real-Time
+EXPO-FT pipeline. The [RTC roadmap](docs/yam_realtime_plan.md) separates the
+implemented transport/prefix-sampler pieces from missing delay-aligned replay,
+filter-critic integration, deadline scheduling and LoRA adaptation.
 
 ### Earlier RTX 4090 experiment
 

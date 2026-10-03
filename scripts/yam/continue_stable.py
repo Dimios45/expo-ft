@@ -44,16 +44,21 @@ def parent_state(root):
     return exp, cur, parent, manifest
 
 
-def prepare(root, dataset):
+def prepare(root, dataset, reuse_frozen_caches=False, allow_older_policy=False):
     from expo_ft.conversion.yam_loader import YamProcessor
     from expo_ft.yam.replay import import_episode
 
     exp, cur, parent, manifest = parent_state(root)
     session = read(dataset / "expo_session.json")
     server = read(root / "sessions" / session["server_session"] / "session.json")
+    source_version = session["policy_version"]
+    if not isinstance(source_version, int) or source_version < 0 or source_version > cur["version"]:
+        raise ValueError("Invalid source policy version")
+    if not allow_older_policy and source_version != cur["version"]:
+        raise ValueError("Older policy requires explicit off-policy admission")
     for key, expected in [
         ("experiment_id", exp["experiment_id"]),
-        ("policy_version", cur["version"]),
+        ("policy_version", source_version),
         ("prompt", exp["prompt"]),
     ]:
         if session[key] != expected or server[key] != expected:
@@ -61,8 +66,18 @@ def prepare(root, dataset):
     if session.get("prefetch") is not False:
         raise ValueError("Require no-prefetch collection")
     parent_sha = sha(parent / "expo.msgpack") if parent else None
-    if session["server_metadata"]["policy_weights_sha256"] != parent_sha:
-        raise ValueError("Rollout weight hash differs from parent")
+    source_sha = server["policy_weights_sha256"]
+    if source_version:
+        source = Path(server["policy_checkpoint"])
+        source_manifest = validate_version(source)
+        if source_manifest["version"] != source_version or source_manifest["settings"] != exp["settings"]:
+            raise ValueError("Source policy manifest mismatch")
+        if sha(source / "expo.msgpack") != source_sha:
+            raise ValueError("Source policy checkpoint changed")
+    if session["server_metadata"]["policy_weights_sha256"] != source_sha:
+        raise ValueError("Rollout weight hash differs from recorded serving session")
+    if source_version == cur["version"] and source_sha != parent_sha:
+        raise ValueError("Current policy hash mismatch")
     pending_path = root / "pending.json"
     if pending_path.exists():
         pending = read(pending_path)
@@ -75,7 +90,8 @@ def prepare(root, dataset):
     else:
         dest = root / "replay" / uuid.uuid4().hex
         eid = import_episode(
-            dataset, dest, YamProcessor(exp["checkpoint"], exp["tokenizer"]), exp, cur
+            dataset, dest, YamProcessor(exp["checkpoint"], exp["tokenizer"]), exp,
+            {**cur, "version": source_version}
         )
         if "replay_inventory" in manifest:
             prior = manifest["replay_inventory"]
@@ -84,7 +100,8 @@ def prepare(root, dataset):
             prior = [{"episode_id": p["episode_id"], "path": p["replay"]}]
         if eid in [p["episode_id"] for p in prior]:
             raise ValueError("Identical episode payload already in replay")
-        inventory = [{"episode_id": p["episode_id"], "path": p["path"]} for p in prior]
+        inventory = [dict(p) if reuse_frozen_caches else
+                     {"episode_id": p["episode_id"], "path": p["path"]} for p in prior]
         inventory.append({"episode_id": eid, "path": str(dest)})
         pending = {
             "parent": cur["version"],
@@ -94,12 +111,14 @@ def prepare(root, dataset):
             "session_sha": sha(dataset / "expo_session.json"),
             "replay_inventory": inventory,
             "parent_sha": parent_sha,
+            "behavior_version": source_version,
+            "behavior_sha": source_sha,
         }
         atomic_json(pending_path, pending)
-    prepare_pools(root, exp, cur, pending)
+    prepare_pools(root, exp, cur, pending, reuse_frozen_caches)
 
 
-def prepare_pools(root, exp, cur, pending):
+def prepare_pools(root, exp, cur, pending, reuse_frozen_caches=False):
     from stability_experiment import observation
 
     from expo_ft.yam.base import BasePolicy
@@ -109,6 +128,16 @@ def prepare_pools(root, exp, cur, pending):
     base = BasePolicy(exp["checkpoint"], exp["tokenizer"], "frozen")
     start = time.time()
     for eidx, item in enumerate(pending["replay_inventory"]):
+        if reuse_frozen_caches and item.get("cache_sha"):
+            if exp["settings"]["actor_mode"] != "frozen":
+                raise ValueError("Cache reuse requires a frozen base")
+            if sha(item["cache"]) != item["cache_sha"]:
+                raise ValueError("Frozen cache integrity failure")
+            for name, digest in item["replay_files"].items():
+                if sha(Path(item["path"]) / name) != digest:
+                    raise ValueError("Replay integrity failure")
+            print("Reusing verified frozen-base pool", item["episode_id"], flush=True)
+            continue
         ep = Episode(item["path"])
         if ep.meta["episode_id"] != item["episode_id"]:
             raise ValueError("Replay identity mismatch")
@@ -323,7 +352,7 @@ def train(root, microbatch=1):
         "limitations": [
             "No held-out evaluation",
             "Recorded nominal timestamps and fixed 30-step windows",
-            "Finite frozen-base candidate pools, refreshed this round",
+            "Finite frozen-base candidate pools; prior pools may be reused when base is frozen",
         ],
         "files": {p.name: sha(p) for p in work.iterdir() if p.is_file()},
     }
@@ -342,6 +371,8 @@ def main():
     p.add_argument("--tokenizer", type=Path)
     p.add_argument("--prompt", default="fold the towel")
     p.add_argument("--microbatch", type=int, choices=[1, 2, 4, 8], default=1)
+    p.add_argument("--reuse-frozen-caches", action="store_true")
+    p.add_argument("--allow-older-policy", action="store_true")
     args = p.parse_args()
     args.root = args.root.resolve()
     if args.stage == "init":
@@ -360,7 +391,7 @@ def main():
     torch.set_num_threads(4)
     with lock(args.root):
         if args.stage == "prepare":
-            prepare(args.root, args.dataset)
+            prepare(args.root, args.dataset, args.reuse_frozen_caches, args.allow_older_policy)
         else:
             train(args.root, microbatch=args.microbatch)
 

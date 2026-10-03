@@ -1,0 +1,3 @@
+# Transport only; install in the pod environment and a separate NUC environment.
+websockets>=14,<16
+msgpack>=1,<2

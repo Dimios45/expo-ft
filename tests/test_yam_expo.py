@@ -253,6 +253,40 @@ def test_import_lerobot_episode_and_stale_version(tmp_path, aborted, video_prefi
         )
 
 
+def test_hitl_prior_label_selection(tmp_path):
+    from expo_ft.yam.replay import hitl_prior_metadata
+
+    atomic_json(
+        tmp_path / "openpi_control_hitl.json",
+        {
+            "episodes": [
+                {"saved": False, "discarded": True},
+                {
+                    "saved": True,
+                    "discarded": False,
+                    "episode_index": 0,
+                    "prompt": "fold the black hoodie",
+                    "success": True,
+                },
+            ]
+        },
+    )
+    label = {
+        "episode_index": 0,
+        "prompt": "fold the black hoodie",
+        "reward": 0,
+        "terminal": "truncated",
+    }
+    atomic_json(tmp_path / "hitl_reward.json", label)
+    session, manifest = hitl_prior_metadata(tmp_path)
+    assert session["reward"] == 0 and session["terminal"] == "truncated"
+    assert "experiment_id" not in session
+    assert len(manifest["episodes"]) == 1
+    atomic_json(tmp_path / "hitl_reward.json", dict(label, episode_index=1))
+    with pytest.raises(ValueError, match="identify"):
+        hitl_prior_metadata(tmp_path)
+
+
 def test_expert_filter_and_optimizer_serialization():
     import optax
     from flax import nnx

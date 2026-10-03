@@ -23,6 +23,8 @@ class RoundPolicy:
         version = Path(cur["checkpoint"]) if cur["checkpoint"] else None
         if version:
             manifest = validate_version(version)
+            if manifest.get("bootstrap_only"):
+                raise ValueError("Bootstrap version is untrained; complete its first training round before serving")
             if (
                 manifest["version"] != cur["version"]
                 or manifest["settings"] != exp["settings"]

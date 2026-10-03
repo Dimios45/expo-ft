@@ -55,14 +55,40 @@ def decode_selected(path, indices):
     return out
 
 
-def import_episode(dataset, dest, processor, experiment, current):
+def hitl_prior_metadata(dataset):
+    """Read explicit offline-prior labels without fabricating a server session."""
+    dataset = Path(dataset)
+    label = read(dataset / "hitl_reward.json")
+    rollout = read(dataset / "openpi_control_hitl.json")
+    saved = [
+        e for e in rollout["episodes"] if e.get("saved") and not e.get("discarded")
+    ]
+    if len(saved) != 1:
+        raise ValueError("HITL prior requires exactly one saved attempt")
+    entry = saved[0]
+    if (
+        label["episode_index"] != entry["episode_index"]
+        or label["prompt"] != entry["prompt"]
+    ):
+        raise ValueError("HITL reward does not identify the saved episode")
+    session = dict(label, dataset_frame="karma-recorded", role="explicit offline prior")
+    return session, dict(rollout, episodes=saved)
+
+
+def import_episode(dataset, dest, processor, experiment, current, *, hitl_prior=False):
     import pyarrow.parquet as pq
 
     dataset = Path(dataset)
     dest = Path(dest)
-    session = read(dataset / "expo_session.json")
+    if hitl_prior:
+        session, rollout = hitl_prior_metadata(dataset)
+        label_path = dataset / "hitl_reward.json"
+    else:
+        session = read(dataset / "expo_session.json")
+        rollout = read(dataset / "openpi_control_rollouts.json")
+        label_path = dataset / "expo_session.json"
     info = read(dataset / "meta/info.json")
-    if (
+    if not hitl_prior and (
         session["experiment_id"] != experiment["experiment_id"]
         or session["policy_version"] != current["version"]
     ):
@@ -81,7 +107,6 @@ def import_episode(dataset, dest, processor, experiment, current):
         raise ValueError("Success reward/terminal disagree")
     if info["fps"] != 30 or info["total_episodes"] != 1:
         raise ValueError("Require exactly one episode at 30 Hz")
-    rollout = read(dataset / "openpi_control_rollouts.json")
     if rollout["speed"] != 1 or rollout["chunk_size"] != 30:
         raise ValueError("First EXPO experiment requires speed=1 and chunk_size=30")
     if (
@@ -110,6 +135,16 @@ def import_episode(dataset, dest, processor, experiment, current):
     ]
     if len(rows) != e["length"]:
         raise ValueError("Episode frame count mismatch")
+    intervention = None
+    if hitl_prior:
+        intervention = np.asarray(
+            [r["intervention"] for r in rows], dtype=np.float32
+        ).reshape(-1)
+        if (
+            intervention.shape != (len(rows),)
+            or not np.isin(intervention, [0, 1]).all()
+        ):
+            raise ValueError("Invalid HITL intervention labels")
     t = np.array([r["timestamp"] for r in rows])
     fi = np.array([r["frame_index"] for r in rows])
     if not np.array_equal(fi, np.arange(len(rows))) or not np.allclose(
@@ -174,15 +209,17 @@ def import_episode(dataset, dest, processor, experiment, current):
             (ends == len(rows) - 1) & (session["terminal"] != "truncated"), 0, 1
         ).astype(np.float32),
     }
+    if intervention is not None:
+        arrays["intervention"] = np.stack([intervention[i : i + 30] for i in starts])
     provenance = {
         str(p.relative_to(dataset)): sha(p)
-        for p in [data_path, dataset / "expo_session.json", *video_paths]
+        for p in [data_path, label_path, *video_paths]
     }
     import hashlib
 
     eid = hashlib.sha256(
         json.dumps(
-            {k: v for k, v in provenance.items() if k != "expo_session.json"},
+            {k: v for k, v in provenance.items() if k != label_path.name},
             sort_keys=True,
         ).encode()
     ).hexdigest()
@@ -197,6 +234,17 @@ def import_episode(dataset, dest, processor, experiment, current):
             "episode_id": eid,
             "session": session,
             "source_hashes": provenance,
+            "collection_manifest_sha256": sha(
+                dataset
+                / (
+                    "openpi_control_hitl.json"
+                    if hitl_prior
+                    else "openpi_control_rollouts.json"
+                )
+            ),
+            "human_frames": int(intervention.sum())
+            if intervention is not None
+            else None,
             "transitions": len(starts),
             "frames": len(rows),
             "representation": "wire-frame normalized by saved checkpoint; full 30-command windows",

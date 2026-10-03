@@ -40,11 +40,8 @@ def parent_state(root):
 
 
 def prepare(root, dataset):
-    from stability_experiment import observation
-
     from expo_ft.conversion.yam_loader import YamProcessor
-    from expo_ft.yam.base import BasePolicy
-    from expo_ft.yam.replay import Episode, import_episode
+    from expo_ft.yam.replay import import_episode
 
     exp, cur, parent, manifest = parent_state(root)
     session = read(dataset / "expo_session.json")
@@ -95,6 +92,16 @@ def prepare(root, dataset):
             "parent_sha": sha(parent / "expo.msgpack"),
         }
         atomic_json(pending_path, pending)
+    prepare_pools(root, exp, cur, pending)
+
+
+def prepare_pools(root, exp, cur, pending):
+    from stability_experiment import observation
+
+    from expo_ft.yam.base import BasePolicy
+    from expo_ft.yam.replay import Episode
+
+    pending_path = root / "pending.json"
     base = BasePolicy(exp["checkpoint"], exp["tokenizer"], "frozen")
     start = time.time()
     for eidx, item in enumerate(pending["replay_inventory"]):
@@ -289,6 +296,7 @@ def train(root):
         "parent_checkpoint": str(parent),
         "parent_sha256": pending["parent_sha"],
         "new_episode": pending["episode_id"],
+        "prior_provenance": pending.get("prior_provenance"),
         "replay_inventory": inventory,
         "settings": cfg.dictionary(),
         "profile": "stable-v2",

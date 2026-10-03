@@ -12,6 +12,8 @@ workflow. The critic, visual encoder, action editor, and temperature are learned
 
 ## Guides and evidence
 
+For the separate hoodie recording, see [T-shirt / hoodie bootstrap](tshirt-expo.md).
+
 | Document | Purpose |
 | --- | --- |
 | [Cloth-folding guide](cloth-folding.MD) | Current commands, configuration, training equations, code map, Karma integration, and limitations |

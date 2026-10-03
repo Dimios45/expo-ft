@@ -5,6 +5,10 @@ WebSocket services were stopped at the operator's request. Ports 8204, 8205 and
 8208 were closed and GPU usage returned to 0 MiB. These instructions describe
 how to operate a deliberately started experiment; they do not imply one is live.
 
+Subsequently, a separate [full-base deployment trial](yam_base_update_benchmark.md)
+reused ports 8204/8205. The closed online learner and upload coordinator remain
+stopped; do not connect this new base to the old experiment registry.
+
 See [experiment results](yam_online_results.md) for measurements and
 [the RTC roadmap](yam_realtime_plan.md) for the distinction from the paper's
 Real-Time EXPO-FT algorithm. Use [A100 deployment](yam_a100_deployment.md) to

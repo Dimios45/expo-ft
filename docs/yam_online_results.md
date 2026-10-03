@@ -6,6 +6,11 @@ the operator. Training, policy inference and pod WebSocket services were stopped
 Final verification found no serving/training workers, ports 8204/8205/8208 closed,
 and GPU usage at 0 MiB with 0% utilization.
 
+That shutdown describes this experiment's conclusion, not current pod availability.
+A later [full-base fit and deployment trial](yam_base_update_benchmark.md) used
+successful episodes from this replay and a separate registry. See the
+[experiment history](yam_experiment_history.md) for the complete sequence.
+
 The frozen checkpoint was `sra-vjti/molmoact2-yam-pi05-jax`, served through the
 verified YAM adapter. This run started from base-only policy version 0 with
 **empty replay and no earlier EXPO weights**, under experiment ID

@@ -1,7 +1,10 @@
 # YAM documentation
 
-The A100/YAM experiment concluded on 2026-10-03. **Training and all pod serving
-services are stopped.** Start with the [online runbook](yam_online_runbook.md)
+The frozen-base A100/YAM experiment concluded on 2026-10-03; its learner remains
+stopped. A separate [full-base fit and deployment trial](yam_base_update_benchmark.md)
+was verified serving the selected base on ports 8204/8205 on that date; check
+health before reuse. Start with the [experiment history](yam_experiment_history.md)
+for the complete timeline and measurement ledger, and the [online runbook](yam_online_runbook.md)
 for the implemented system and [final results](yam_online_results.md) for evidence.
 Nothing in these documents authorizes restarting the closed experiment.
 
@@ -14,9 +17,11 @@ restart. Checkpoints and recordings are local artifacts, not included in Git.
 
 | Document | Scope |
 | --- | --- |
+| [Experiment history](yam_experiment_history.md) | Setup, manual and online runs, shutdown, full-base training, GPU/network ledger and artifact preservation |
 | [Online runbook](yam_online_runbook.md) | Fresh setup, NUC prompts, automatic uploads, learner queue, policy leases, interruptions and recovery |
 | [Online results](yam_online_results.md) | Six episodes/updates, behavior versions, VRAM/timing, timeout and final shutdown |
-| [RTC roadmap](yam_realtime_plan.md) | Paper comparison, implemented sampler, missing RTC alignment and deadline work |
+| [Full base-update benchmark](yam_base_update_benchmark.md) | All-parameter training, episode-held-out checkpoint selection, A100 measurements and NUC deployment test |
+| [RTC roadmap](yam_realtime_plan.md) | Agreed local 4090/cloud learner plan, alternatives, paper comparison, bandwidth, weight synchronization and RTC gates |
 | [A100 deployment](yam_a100_deployment.md) | Environment/model installation and historical manual round commands |
 | [A100 round 1](yam_a100_round1_results.md) | Earlier sequential run's sampling speedup, VRAM and first-round validation |
 | [Cloth folding](cloth-folding.MD) | Separate earlier RTX 4090/YAM experiment; different paths and versions |
@@ -40,11 +45,17 @@ One commit can include all current source, tests and documentation changes:
 
 ```bash
 cd /workspace/expo-ft
-git add -- README.md docs/ expo_ft/yam/ scripts/yam/ tests/
+git add -- README.md docs/ \
+  scripts/yam/benchmark_base_update.py \
+  scripts/yam/check_base_deployment.py \
+  scripts/yam/fit_base.py \
+  scripts/yam/train_full_base.sh \
+  tests/test_yam_base_fit.py
 git diff --cached --check
 git diff --cached --stat
-git commit -m "Add YAM online episode collection and frozen-base EXPO training" \
-  -m "Stream resumable episode uploads over WebSocket, train accumulated replay, and publish policies between supervised episodes. Add recovery checks, RTC sampler validation, and the completed A100 experiment runbook and results."
+git diff --cached
+git commit -m "Add YAM full-base training and document local-cloud EXPO roadmap" \
+  -m "Add measured all-weight training, held-out checkpoint selection and deployment checks. Document online experiment results, GPU memory and network measurements, and the proposed local 4090 inference and cloud learning architecture."
 ```
 
 Review `git diff --cached` when other work is staged. These commands stage the

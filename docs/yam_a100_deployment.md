@@ -5,7 +5,9 @@ record → SCP → train → restart workflow. For automatic episode uploads,
 concurrent learning and boundary policy updates, use the
 [online runbook](yam_online_runbook.md).
 
-The 2026-10-03 online experiment is concluded and all pod services are stopped.
+The 2026-10-03 online experiment concluded and its services were stopped.
+A subsequent separate [full-base deployment trial](yam_base_update_benchmark.md)
+was verified on ports 8204/8205; check health before reuse.
 Its final registry is `artifacts/yam-online-base/learner`, ending at version 6;
 [the results report](yam_online_results.md) records its outcomes and measurements.
 The `artifacts/yam-expo` paths below refer to the earlier sequential experiment,

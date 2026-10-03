@@ -23,11 +23,19 @@ provides model/environment setup and the older manual round workflow. YAM uses
 `.venv-convert` on the GPU host and KARMA's own environment on the NUC, rather
 than the upstream DROID setup below.
 
-The 2026-10-03 experiment is **concluded; all pod services are stopped**.
-It started from the original base with empty replay and completed six training
+The 2026-10-03 frozen-base online experiment is **concluded**. That experiment
+started from the original base with empty replay and completed six training
 rounds: 200 critic, 10 editor and 10 temperature updates. Base weights stayed
 frozen. See [final results](docs/yam_online_results.md) for episode outcomes,
 policy versions, timing, VRAM and the timeout/recovery incident.
+
+A separate [full-base fit and deployment trial](docs/yam_base_update_benchmark.md)
+completed 40 all-weight updates, selected step 25 using episode-held-out
+validation, and passed pod HTTP/WebSocket checks. Training peaked at 64.79 GiB;
+separate inference peaked at 13.31 GiB. The candidate was verified serving on
+2026-10-03; check health before reuse. See the [experiment history](docs/yam_experiment_history.md)
+for the chronology and the [local/cloud plan](docs/yam_realtime_plan.md#agreed-localcloud-architecture-planned-not-implemented)
+for the agreed wired-4090 inference / cloud-learning design, which is not yet implemented.
 
 This deployed path is delayed online EXPO, not the complete paper Real-Time
 EXPO-FT pipeline. The [RTC roadmap](docs/yam_realtime_plan.md) separates the

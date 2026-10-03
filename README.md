@@ -14,12 +14,26 @@ To determine which is best for your task, use the following criteria:
 - If your forward pass does not fit inside a control step and your task needs the policy to be reactive to changes in the environment, use [Real-Time EXPO-FT](#running-real-time-expo-ft).
 
 
-## Bimanual YAM cloth folding on an RTX 4090
+## Bimanual YAM with KARMA on the A100
+
+Start with the [A100 deployment guide](docs/yam_a100_deployment.md) for the
+isolated Python environment, pinned OpenPI revision, NUC SSH tunnel, episode
+recording, transfer, stable EXPO updates, GPU measurements, and serving.
+This YAM workflow trains the critic/editor between episodes with the base frozen.
+It uses `.venv-convert` on the GPU host and KARMA's own environment on the NUC.
+It does not use the DROID client or the upstream setup commands below.
+
+The [real-time roadmap](docs/yam_realtime_plan.md) compares both papers and
+describes the streaming and scheduling work still needed for live YAM learning.
+The all-weights update is a separate planned experiment, not part of the current
+frozen-base deployment.
+
+### Earlier RTX 4090 experiment
 
 For the Karma client and single-GPU YAM experiment, start with the
 [cloth-folding guide](docs/cloth-folding.MD). It contains the NUC recording,
 dataset transfer, conservative EXPO training, validation, and server commands,
-plus the active parameters and implementation details. This workflow freezes
+plus that experiment's parameters and implementation details. This workflow freezes
 the base π₀.₅ model and trains the critic, visual encoder, and bounded action
 editor between episodes.
 

@@ -37,6 +37,9 @@ def mean_tree(trees):
 
 class StableEXPO(YamEXPO):
     def __init__(self, *args, **kwargs):
+        self.microbatch = int(kwargs.pop("microbatch", 1))
+        if self.microbatch < 1:
+            raise ValueError("microbatch must be positive")
         super().__init__(*args, **kwargs)
         if not self.cfg.scale_entropy_target:
             raise ValueError("Stable learner requires consistent entropy coordinates")
@@ -44,6 +47,13 @@ class StableEXPO(YamEXPO):
         self._eg = jax.jit(self._editor_gradient)
         self._ca = jax.jit(self._critic_apply)
         self._ea = jax.jit(self._editor_apply)
+        def parallel_mean(fn):
+            def run(state, batches, keys):
+                grads, metrics = jax.vmap(fn, in_axes=(None, 0, 0))(state, batches, keys)
+                return jax.tree.map(lambda x: x.mean(0), (grads, metrics))
+            return jax.jit(run)
+        self._parallel_cg = parallel_mean(self._critic_gradient)
+        self._parallel_eg = parallel_mean(self._editor_gradient)
 
     def _critic_gradient(self, state, batch, key):
         sk, bk = jax.random.split(key)
@@ -146,6 +156,20 @@ class StableEXPO(YamEXPO):
         }
 
     def _accumulate(self, batches, gradient_fn, seed):
+        if self.microbatch > 1 and len(batches) > 1:
+            parallel = self._parallel_cg if gradient_fn is self._cg else self._parallel_eg
+            total, summary = None, None
+            for start in range(0, len(batches), self.microbatch):
+                group = batches[start:start + self.microbatch]
+                stacked = jax.tree.map(lambda *xs: jnp.stack(xs), *group)
+                keys = jnp.stack([jax.random.fold_in(seed, i)
+                                  for i in range(start, start + len(group))])
+                g, m = parallel(self.state, stacked, keys)
+                weight = len(group) / len(batches)
+                g, m = jax.tree.map(lambda x: x * weight, (g, m))
+                total = g if total is None else jax.tree.map(jnp.add, total, g)
+                summary = m if summary is None else jax.tree.map(jnp.add, summary, m)
+            return total, summary
         grads = None
         metrics = []
         for index, batch in enumerate(batches):

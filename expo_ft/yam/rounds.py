@@ -57,6 +57,29 @@ def initialize(root, checkpoint, tokenizer, settings, prompt):
         or not (tokenizer / "tokenizer_config.json").exists()
     ):
         raise ValueError("Missing checkpoint/tokenizer")
+    conversion = checkpoint / "conversion_manifest.json"
+    if conversion.exists():
+        source_sha = read(conversion)["source_sha256"]
+        provenance = {"kind": "conversion-source", "source_sha256": source_sha}
+    else:
+        # Published Orbax checkpoints need not include the original conversion
+        # report. Fingerprint the actual model/processor assets, not a fabricated
+        # hash of the unavailable source PyTorch checkpoint.
+        files = sorted(p for p in (checkpoint / "params").rglob("*") if p.is_file())
+        for name in ("config.json", "policy_preprocessor.json", "policy_postprocessor.json"):
+            path = checkpoint / name
+            if not path.is_file():
+                raise ValueError(f"Missing checkpoint asset: {name}")
+            files.append(path)
+        files.extend(sorted(checkpoint.glob("*.safetensors")))
+        if not any(p.is_relative_to(checkpoint / "params") for p in files):
+            raise ValueError("Empty checkpoint params")
+        hashes = {str(p.relative_to(checkpoint)): sha(p) for p in files}
+        source_sha = hashlib.sha256(
+            json.dumps(hashes, sort_keys=True).encode()
+        ).hexdigest()
+        provenance = {"kind": "published-checkpoint-assets", "files": hashes,
+                      "sha256": source_sha}
     root.mkdir(parents=True)
     (root / "replay").mkdir()
     (root / "versions").mkdir()
@@ -70,9 +93,8 @@ def initialize(root, checkpoint, tokenizer, settings, prompt):
             "settings": settings,
             "prompt": prompt,
             "experiment_id": uuid.uuid4().hex,
-            "source_sha": read(checkpoint / "conversion_manifest.json")[
-                "source_sha256"
-            ],
+            "source_sha": source_sha,
+            "checkpoint_provenance": provenance,
         },
     )
     atomic_json(

@@ -21,6 +21,7 @@ import numpy as np
 from expo_ft.yam.rounds import (
     atomic_json,
     commit_round,
+    initialize,
     lock,
     read,
     sha,
@@ -30,10 +31,14 @@ from expo_ft.yam.rounds import (
 
 def parent_state(root):
     exp, cur = read(root / "experiment.json"), read(root / "current.json")
-    parent = Path(cur["checkpoint"])
-    manifest = validate_version(parent)
     if exp.get("profile") != "stable-v2" or exp["settings"]["actor_mode"] != "frozen":
         raise ValueError("Requires stable-v2 frozen-base profile")
+    if cur["checkpoint"] is None:
+        if cur["version"] != 0 or cur["episodes"]:
+            raise ValueError("Missing trained parent checkpoint")
+        return exp, cur, None, {"replay_inventory": []}
+    parent = Path(cur["checkpoint"])
+    manifest = validate_version(parent)
     if manifest["settings"] != exp["settings"] or manifest["version"] != cur["version"]:
         raise ValueError("Parent configuration/version mismatch")
     return exp, cur, parent, manifest
@@ -55,9 +60,8 @@ def prepare(root, dataset):
             raise ValueError("Collecting policy identity mismatch: " + key)
     if session.get("prefetch") is not False:
         raise ValueError("Require no-prefetch collection")
-    if session["server_metadata"]["policy_weights_sha256"] != sha(
-        parent / "expo.msgpack"
-    ):
+    parent_sha = sha(parent / "expo.msgpack") if parent else None
+    if session["server_metadata"]["policy_weights_sha256"] != parent_sha:
         raise ValueError("Rollout weight hash differs from parent")
     pending_path = root / "pending.json"
     if pending_path.exists():
@@ -89,7 +93,7 @@ def prepare(root, dataset):
             "dataset": str(dataset.resolve()),
             "session_sha": sha(dataset / "expo_session.json"),
             "replay_inventory": inventory,
-            "parent_sha": sha(parent / "expo.msgpack"),
+            "parent_sha": parent_sha,
         }
         atomic_json(pending_path, pending)
     prepare_pools(root, exp, cur, pending)
@@ -160,7 +164,7 @@ def prepare_pools(root, exp, cur, pending):
     print("REPLAY AND FRESH CANDIDATE POOLS READY", flush=True)
 
 
-def train(root):
+def train(root, microbatch=1):
     from expo_ft.yam.learner import Settings
     from expo_ft.yam.replay import Episode
     from expo_ft.yam.stable import StableEXPO, crop_batch
@@ -173,7 +177,7 @@ def train(root):
         return
     if not pending.get("prepared") or pending["parent"] != cur["version"]:
         raise ValueError("Prepare this round first")
-    if pending["parent_sha"] != sha(parent / "expo.msgpack"):
+    if pending["parent_sha"] != (sha(parent / "expo.msgpack") if parent else None):
         raise ValueError("Parent checkpoint changed")
     inventory = pending["replay_inventory"]
     episodes = []
@@ -187,8 +191,9 @@ def train(root):
         episodes.append(Episode(item["path"]))
         pools.append(np.load(item["cache"], mmap_mode="r"))
     cfg = Settings.from_dict(exp["settings"])
-    agent = StableEXPO(cfg)
-    agent.restore(parent / "expo.msgpack")
+    agent = StableEXPO(cfg, microbatch=microbatch)
+    if parent:
+        agent.restore(parent / "expo.msgpack")
     before = {
         "critic": int(agent.state["updates"]),
         "editor": int(agent.state["editor"].step),
@@ -293,7 +298,7 @@ def train(root):
     result = {
         "version": cur["version"] + 1,
         "parent_version": cur["version"],
-        "parent_checkpoint": str(parent),
+        "parent_checkpoint": str(parent) if parent else None,
         "parent_sha256": pending["parent_sha"],
         "new_episode": pending["episode_id"],
         "prior_provenance": pending.get("prior_provenance"),
@@ -311,6 +316,7 @@ def train(root):
         "terminal_checks": terminal_checks,
         "terminal_before": terminal_before,
         "effective_batch_size": 8,
+        "parallel_microbatch": microbatch,
         "terminal_auxiliary_weight": 0.25,
         "elapsed_seconds": time.time() - start,
         "deployable": False,
@@ -329,10 +335,26 @@ def train(root):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("stage", choices=["prepare", "train"])
+    p.add_argument("stage", choices=["init", "prepare", "train"])
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--dataset", type=Path, default=ROOT / "round-0001")
+    p.add_argument("--checkpoint", type=Path)
+    p.add_argument("--tokenizer", type=Path)
+    p.add_argument("--prompt", default="fold the towel")
+    p.add_argument("--microbatch", type=int, choices=[1, 2, 4, 8], default=1)
     args = p.parse_args()
+    args.root = args.root.resolve()
+    if args.stage == "init":
+        if args.checkpoint is None or args.tokenizer is None:
+            p.error("init requires --checkpoint and --tokenizer")
+        from stability_experiment import profile
+
+        initialize(args.root, args.checkpoint, args.tokenizer, profile().dictionary(), args.prompt)
+        exp = read(args.root / "experiment.json")
+        exp.update(profile="stable-v2")
+        atomic_json(args.root / "experiment.json", exp)
+        print("Initialized stable EXPO version 0 (base only):", args.root, flush=True)
+        return
     import torch
 
     torch.set_num_threads(4)
@@ -340,7 +362,7 @@ def main():
         if args.stage == "prepare":
             prepare(args.root, args.dataset)
         else:
-            train(args.root)
+            train(args.root, microbatch=args.microbatch)
 
 
 if __name__ == "__main__":

@@ -1,14 +1,17 @@
 # YAM documentation
 
-Start with [Cloth folding on the RTX 4090 and YAM NUC](cloth-folding.MD).
-It is the operating guide for the current `stable-v2` experiment: record one
-episode with Karma, label the outcome, transfer the complete dataset, prepare
-replay, train, validate, and restart the versioned server.
+For the current A100 pod, start with [A100 deployment and collection](yam_a100_deployment.md).
+The active experiment is `/workspace/expo-ft/artifacts/yam-expo`; its
+`current.json` and version manifests are authoritative. Stable EXPO trains the
+critic, visual encoder, action editor, and temperature while preserving the base.
 
-The documented snapshot is version 4. Subsequent runs advance `current.json`;
-use the experiment's actual manifest and status rather than assuming that the
-version in a report is still current. The base model stays frozen in this
-workflow. The critic, visual encoder, action editor, and temperature are learned.
+[Real-time YAM roadmap](yam_realtime_plan.md) compares the two papers with the
+current implementation and specifies the NUC/A100 streaming, latency, scheduling,
+and replay work still needed. It is a design, not an already deployed live learner.
+
+[Cloth folding on the RTX 4090 and YAM NUC](cloth-folding.MD) documents a separate
+earlier experiment whose version numbers and machine paths do not apply to the
+A100 run. Do not mix the two experiment registries.
 
 ## Guides and evidence
 
@@ -16,7 +19,10 @@ For the separate hoodie recording, see [T-shirt / hoodie bootstrap](tshirt-expo.
 
 | Document | Purpose |
 | --- | --- |
-| [Cloth-folding guide](cloth-folding.MD) | Current commands, configuration, training equations, code map, Karma integration, and limitations |
+| [A100 deployment](yam_a100_deployment.md) | Current pod, SSH tunnel, recording, transfer, train, and restart commands |
+| [A100 round 1](yam_a100_round1_results.md) | Measured parallel sampling speedup, VRAM, and first-round validation |
+| [Real-time roadmap](yam_realtime_plan.md) | Paper comparison, WebSocket design, delayed action execution, live replay, and one-GPU scheduling |
+| [Cloth-folding guide](cloth-folding.MD) | Earlier 4090 experiment, training equations, code map, and limitations |
 | [Checkpoint conversion](yam_checkpoint_conversion.md) | Offline weight conversion and model-loading validation |
 | [Conversion results](yam_conversion_results.md) | Recorded numerical parity checks and serving conventions |
 | [Stability review](yam_expo_stability_plan.md) | Historical diagnosis and proposal for the conservative restart |
@@ -31,17 +37,20 @@ the same way.
 
 ## Commit the implementation and documentation
 
-Run these commands from the GPU host's repository. They stage the YAM source,
-conversion code, scripts, dependency requirements, Karma recorder patch, tests,
-and documentation. They do not run training or connect to hardware.
+For the A100 changes, stage only the implementation, tests, and documentation
+listed below. These commands do not run training or connect to hardware.
 
 ```bash
-cd /home/sra/tirth/expo-ft
+cd /workspace/expo-ft
 
 git add -- \
-  .gitattributes .gitignore README.md docs/ \
-  expo_ft/conversion/ expo_ft/yam/ \
-  scripts/yam/ tests/
+  README.md docs/README.md \
+  docs/yam_a100_deployment.md docs/yam_a100_round1_results.md docs/yam_realtime_plan.md \
+  expo_ft/yam/base.py expo_ft/yam/rounds.py expo_ft/yam/stable.py \
+  scripts/yam/continue_stable.py scripts/yam/check_http.py \
+  scripts/yam/download_pod_assets.sh scripts/yam/measure_gpu.py \
+  scripts/yam/pod_expo.sh scripts/yam/run_pod_server.sh \
+  tests/test_yam_stability.py tests/test_yam_published_checkpoint.py
 
 git diff --cached --check
 git diff --cached --stat
@@ -51,17 +60,11 @@ git diff --cached --name-only
 Review the staged files, then commit if they are the intended changes:
 
 ```bash
-git commit -m "Add single-GPU YAM EXPO workflow and cloth-folding documentation"
+git commit -m "Add A100 YAM EXPO workflow, parallel training, and realtime roadmap"
 ```
 
-The root `.gitignore` excludes `round-0000/` and other `round-<number>` dataset
-directories, the `expo-ft-jax-rollouts-*` recording symlink, local environments,
-and generated caches. Checkpoints, replay stores, inference traces, tokenizer
-files, and model weights under `/usr/local/models/sra-expo-ft/` are external
-artifacts, not part of this commit. Preserve and back up those separately;
-committing the code does not back up the trained model or collected episodes.
-
-The command includes `scripts/yam/karma-refresh-state.patch` as a patch file.
-Committing it here does not apply it to the NUC's separate Karma checkout.
-See the cloth-folding guide for its purpose, application steps, and validation
-limits.
+The root `.gitignore` excludes `artifacts/`, `logs/`, `.venv-convert`, the nested
+OpenPI checkout, and generated caches. Thus model weights, replay, rollout videos,
+tokenizers, and measured run logs are not included. HF credentials are outside
+this repository and are not staged by these commands. Preserve trained versions
+and data separately: a source commit is not a model or dataset backup.

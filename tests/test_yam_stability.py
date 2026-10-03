@@ -86,3 +86,19 @@ def test_success_and_failure_terminal_auxiliary():
     assert metrics["terminal_target"] == 0.5
     assert metrics["target_mean"] == 0.0
     assert int(agent.state["editor"].step) == 0
+
+
+def test_parallel_accumulation_preserves_gradients_and_keys():
+    sequential = StableEXPO(settings(), image_size=8)
+    parallel = StableEXPO(settings(), image_size=8, microbatch=2)
+    batches = []
+    for i in range(3):
+        mb = batch()
+        mb["actions"] = mb["actions"] + i * 0.01
+        mb["rewards"] = mb["rewards"] * (i + 1) / 3
+        batches.append(mb)
+    for left, right in [(sequential._cg, parallel._cg), (sequential._eg, parallel._eg)]:
+        a = sequential._accumulate(batches, left, jax.random.PRNGKey(17))
+        b = parallel._accumulate(batches, right, jax.random.PRNGKey(17))
+        for x, y in zip(jax.tree.leaves(a), jax.tree.leaves(b)):
+            np.testing.assert_allclose(x, y, atol=2e-6, rtol=2e-4)

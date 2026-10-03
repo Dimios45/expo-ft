@@ -1,6 +1,7 @@
 """FP32 YAM base policy, sequential candidates and optional expert-only SFT."""
 
 from pathlib import Path
+import os
 
 import jax
 import jax.numpy as jnp
@@ -57,6 +58,10 @@ class BasePolicy:
             self.trainable = restore_tree(self.trainable, Path(patch).read_bytes())
             self.sync()
         self._train = jax.jit(self._train_step, donate_argnums=(0, 2))
+        self.candidate_batch = int(os.environ.get("YAM_CANDIDATE_BATCH", "1"))
+        if self.candidate_batch < 1:
+            raise ValueError("YAM_CANDIDATE_BATCH must be positive")
+        self._parallel_sample = jax.jit(jax.vmap(self.policy._sample, in_axes=(None, None, 0)))
 
     def sync(self):
         # Replace only expert leaves; frozen VLM arrays remain shared.
@@ -68,12 +73,16 @@ class BasePolicy:
     def candidates(self, data, count, rng):
         obs = as_observation(data)
         result = []
-        for _ in range(count):
-            noise = rng.standard_normal((1, 30, 32)).astype(np.float32)
-            pred = np.asarray(
-                self.policy._sample(self.policy._state, obs, jnp.asarray(noise))
-            )
-            result.append(pred[0, :, :14])
+        for start in range(0, count, self.candidate_batch):
+            size = min(self.candidate_batch, count - start)
+            noise = np.stack([rng.standard_normal((1, 30, 32)).astype(np.float32)
+                              for _ in range(size)])
+            if size == 1:
+                pred = np.asarray(self.policy._sample(self.policy._state, obs, jnp.asarray(noise[0])))
+                result.append(pred[0, :, :14])
+            else:
+                pred = np.asarray(self._parallel_sample(self.policy._state, obs, jnp.asarray(noise)))
+                result.extend(pred[:, 0, :, :14])
         result = np.stack(result)
         if result.shape != (count, 30, 14) or not np.isfinite(result).all():
             raise FloatingPointError("Invalid base candidate chunks")

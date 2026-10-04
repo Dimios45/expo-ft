@@ -475,6 +475,12 @@ bash scripts/dynamic_pick/eval_policy.sh
 Use the same `--delay`, `--replan_steps`, model config and `filter_*` settings as training; `--checkpoint_dir` points at the run from step 2.
 
 
+## YAM JAX inference
+
+See [JAX serving on RTX 3060, RTX 4090, and A100](docs/yam_jax_serving.md)
+for explicit FP32/BF16 commands, unified-memory serving when weights exceed
+VRAM, RAM and swap requirements, benchmark results, and source references.
+
 ## Citation
 
 <!-- TODO(release): fill in the author list and arXiv id below. -->

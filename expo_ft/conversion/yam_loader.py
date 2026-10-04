@@ -163,6 +163,7 @@ def inference_functions(model):
 
 class YamJaxPolicy:
     def __init__(self, checkpoint, tokenizer, dtype="float32"):
+        self.dtype = dtype
         if (Path(checkpoint) / "INCOMPLETE").exists():
             raise ValueError("Incomplete conversion")
         self.processor = YamProcessor(checkpoint, tokenizer)

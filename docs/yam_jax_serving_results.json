@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-04",
+  "gpu": "RTX 3060 12 GiB",
+  "jax": "0.5.3",
+  "orbax": "0.11.13",
+  "driver": "580.178.04",
+  "scope": "Synthetic inputs; finite (30,14) outputs. No hardware action or accuracy validation. Memory snapshots, not peaks. CLI refactor tested separately on CPU.",
+  "fp32_unified": {
+    "health": {
+      "status": "ok",
+      "policy_type": "pi05",
+      "backend": "jax",
+      "checkpoint": "/home/sra/expo-ft/yam-pi05",
+      "dtype": "float32",
+      "norm_tag": "yam_dual_molmoact2",
+      "state_dim": 14,
+      "num_cameras": 3,
+      "action_horizon": 30,
+      "num_steps": 10,
+      "normalization": "saved checkpoint quantiles",
+      "action_representation": "absolute joint targets in radians; grippers passed through",
+      "gripper_adapter": "none; matches PyTorch pass-through",
+      "hardware_mapping_verified": false
+    },
+    "requests": [
+      {
+        "request": 1,
+        "wall_s": 3.3273934309836477,
+        "server_ms": 3238.4932920103893,
+        "shape": [
+          30,
+          14
+        ],
+        "finite": true
+      },
+      {
+        "request": 2,
+        "wall_s": 1.2458665299927816,
+        "server_ms": 1181.6069799824618,
+        "shape": [
+          30,
+          14
+        ],
+        "finite": true
+      },
+      {
+        "request": 3,
+        "wall_s": 0.9031501159770414,
+        "server_ms": 896.8824329786003,
+        "shape": [
+          30,
+          14
+        ],
+        "finite": true
+      }
+    ],
+    "additional_request_ms": [
+      903.4835799830034,
+      900.7922600139864,
+      885.1803509751335,
+      890.4473519651219,
+      888.2178800413385,
+      887.2382060508244,
+      890.2789499843493,
+      888.4067360195331,
+      892.8694000351243,
+      891.1170599749312
+    ]
+  },
+  "bf16_device": {
+    "health": {
+      "status": "ok",
+      "policy_type": "pi05",
+      "backend": "jax",
+      "checkpoint": "/home/sra/expo-ft/yam-pi05",
+      "dtype": "bfloat16",
+      "norm_tag": "yam_dual_molmoact2",
+      "state_dim": 14,
+      "num_cameras": 3,
+      "action_horizon": 30,
+      "num_steps": 10,
+      "normalization": "saved checkpoint quantiles",
+      "action_representation": "absolute joint targets in radians; grippers passed through",
+      "gripper_adapter": "none; matches PyTorch pass-through",
+      "hardware_mapping_verified": false
+    },
+    "request_ms": [
+      378.2338300370611,
+      375.98557997262105,
+      358.3447950077243,
+      360.6057029683143,
+      360.7007230166346,
+      360.69476703414693,
+      360.7030869461596,
+      362.8987389965914,
+      360.47180800233036,
+      358.67665702244267,
+      363.7113160220906,
+      361.73888097982854,
+      361.4948780159466
+    ],
+    "steady_median_ms": 360.7019049813971
+  }
+}

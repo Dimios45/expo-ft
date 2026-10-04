@@ -324,8 +324,10 @@ def model_config(dtype="float32"):
 
 
 def load_model(checkpoint, dtype="float32"):
+    import jax.numpy as jnp
     from openpi.models.model import restore_params
 
     return model_config(dtype).load(
-        restore_params(Path(checkpoint) / "params"), remove_extra_params=False
+        restore_params(Path(checkpoint) / "params", dtype=jnp.dtype(dtype)),
+        remove_extra_params=False,
     )

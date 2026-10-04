@@ -17,6 +17,7 @@ restart. Checkpoints and recordings are local artifacts, not included in Git.
 
 | Document | Scope |
 | --- | --- |
+| [JAX serving on 3060, 4090, and A100](yam_jax_serving.md) | FP32/BF16 commands, unified memory, RAM/VRAM explanation, measured results, and references |
 | [Experiment history](yam_experiment_history.md) | Setup, manual and online runs, shutdown, full-base training, GPU/network ledger and artifact preservation |
 | [Online runbook](yam_online_runbook.md) | Fresh setup, NUC prompts, automatic uploads, learner queue, policy leases, interruptions and recovery |
 | [Online results](yam_online_results.md) | Six episodes/updates, behavior versions, VRAM/timing, timeout and final shutdown |

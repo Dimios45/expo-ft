@@ -148,13 +148,16 @@ uv pip install --python .venv-convert/bin/python -r scripts/yam/requirements-ser
 CUDA_VISIBLE_DEVICES=0 .venv-convert/bin/python scripts/yam/serve_jax.py \
   --checkpoint /usr/local/models/sra-expo-ft/yam_pi05_jax \
   --tokenizer /home/sra/molmoact2/outputs/models/paligemma-tokenizer \
+  --dtype fp32 --memory-mode device \
   --host 0.0.0.0 --port 8204
 ```
 
 Wait for warmup and `Uvicorn running`, then check `curl http://127.0.0.1:8204/healthz`.
 Karma's server URL is `http://192.168.0.167:8204/act`. The server accepts
 `json_numpy` RGB arrays or encoded camera images, 14-D state, instruction,
-and `num_steps=10`; it returns absolute `(30,14)` actions. FP32 is intentional.
+and `num_steps=10`; it returns absolute `(30,14)` actions. This command selects FP32.
+For BF16, RTX 3060 FP32 with unified memory, A100 commands, memory requirements,
+and measured results, see [the JAX serving guide](yam_jax_serving.md).
 The normalization tag identifies the YAM wire schema; normalization uses the
 checkpoint's saved quantiles. CUDA graph flags are ignored (JAX uses JIT).
 One process owns the model; do not launch multiple workers.

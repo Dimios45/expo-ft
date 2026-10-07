@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "run": "yam-lan-001",
+  "prompt": "fold the t-shirt",
+  "hosts": {
+    "nuc": {
+      "ip": "192.168.0.121",
+      "interface": "eno1"
+    },
+    "inference": {
+      "ip": "192.168.0.119",
+      "interface": "enp3s0"
+    },
+    "learner": {
+      "ip": "192.168.0.167",
+      "interface": "enp3s0"
+    }
+  },
+  "checkpoint": null,
+  "tokenizer": null,
+  "base_sha256": null,
+  "preprocessing_sha256": null,
+  "control_hz": 30,
+  "episode_seconds": 300,
+  "replan_steps": 8,
+  "delay": 5,
+  "candidates": 8,
+  "dtype": "bfloat16",
+  "bulk_bytes_per_second": 20000000,
+  "ready_deadline_seconds": 270,
+  "effective_batch": 8,
+  "microbatch": 8,
+  "critic_steps": 40,
+  "editor_every": 20,
+  "replay_cache_bytes": 17179869184,
+  "gates": {
+    "wired_network": false,
+    "inference_memory": false,
+    "control_deadlines": false,
+    "learner_deadline": false,
+    "frozen_prefix_behavior": false,
+    "autonomous_reward_reset": false
+  }
+}

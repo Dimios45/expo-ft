@@ -125,7 +125,7 @@ def prepare_pools(root, exp, cur, pending, reuse_frozen_caches=False):
     from expo_ft.yam.replay import Episode
 
     pending_path = root / "pending.json"
-    base = BasePolicy(exp["checkpoint"], exp["tokenizer"], "frozen")
+    base = BasePolicy(exp["checkpoint"], exp["tokenizer"], "frozen", dtype=exp.get("base_dtype", "float32"))
     start = time.time()
     for eidx, item in enumerate(pending["replay_inventory"]):
         if reuse_frozen_caches and item.get("cache_sha"):

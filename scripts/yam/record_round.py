@@ -6,6 +6,7 @@ Only Python stdlib is required here. The assistant does not execute this script.
 
 import argparse
 import json
+import shutil
 import subprocess
 import time
 import urllib.request
@@ -36,12 +37,28 @@ def require_saved_episode(folder, returncode):
         raise RuntimeError('KARMA saved no complete episode record; no outcome label requested')
 
 
+def ask_choice(prompt, allowed):
+    while True:
+        value=input(prompt).strip().lower()
+        if value in allowed: return value
+        print('Please enter one of: '+', '.join(sorted(allowed)),flush=True)
+
+
+def preserve_runtime_logs(folder):
+    if not folder.exists(): return
+    dest=folder/'runtime-logs';dest.mkdir(exist_ok=True)
+    sources=[Path('logs/runtime/rollout.log'), *Path('logs').glob('pi_control_node__follower__*__Yam.log')]
+    for source in sources:
+        if source.is_file(): shutil.copy2(source,dest/source.name)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--server", required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--seconds", type=float, default=300)
     p.add_argument("--auto-upload", action="store_true", help="Parent runner manages episode upload")
+    p.add_argument("--fixed-prompt", action="store_true", help="Confirm the server task instead of retyping it")
     p.add_argument("karma_args", nargs=argparse.REMAINDER)
     args = p.parse_args()
     extra = args.karma_args
@@ -106,6 +123,10 @@ def main():
         "--no-prefetch",
         *extra,
     ]
+    if args.fixed_prompt:
+        adapter = Path(__file__).with_name('karma_episode.py')
+        if not adapter.is_file(): raise FileNotFoundError(adapter)
+        command = ['uv', 'run', '--no-sync', 'python', str(adapter), '--prompt', before['prompt'], '--', *command[3:]]
     process = subprocess.Popen(command)
     while True:
         try:
@@ -115,23 +136,16 @@ def main():
             print(
                 "Waiting for Karma to finish shutdown and saving; answer its outcome prompts...", flush=True
             )
+    try: preserve_runtime_logs(args.out)
+    except OSError as exc: print(f'Runtime log copy failed: {exc}',flush=True)
     require_saved_episode(args.out, returncode)
     after = health(args.server)
     for key in ("experiment_id", "policy_version", "session_id"):
         if before[key] != after[key]:
             raise RuntimeError("Server changed during episode; recording not admitted")
-    label = input("Task success reward [0/1]: ").strip()
-    if label not in ("0", "1"):
-        raise ValueError("Reward must be 0 or 1")
-    terminal = (
-        "success"
-        if label == "1"
-        else input(
-            "Failure or interrupted/time-limit truncation [failure/truncated]: "
-        ).strip()
-    )
-    if terminal not in ("success", "failure", "truncated"):
-        raise ValueError("Invalid terminal reason")
+    label = ask_choice('Task success reward [0/1]: ', {'0','1'})
+    terminal = 'success' if label=='1' else ask_choice(
+        'Failure or interrupted/time-limit truncation [failure/truncated]: ', {'failure','truncated'})
     session = {
         "experiment_id": before["experiment_id"],
         "policy_version": before["policy_version"],

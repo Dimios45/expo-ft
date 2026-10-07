@@ -24,3 +24,18 @@ def test_saved_episode_accepted(tmp_path):
     (tmp_path/'meta/info.json').write_text(json.dumps(dict(total_episodes=1,total_frames=50)))
     (tmp_path/'openpi_control_rollouts.json').write_text(json.dumps(dict(episodes=[dict(saved=True)])))
     module.require_saved_episode(tmp_path,0)
+
+
+def test_invalid_label_reprompts(monkeypatch):
+    replies=iter(['yes','x','1'])
+    monkeypatch.setattr('builtins.input',lambda _:next(replies))
+    assert module.ask_choice('reward',{'0','1'})=='1'
+
+
+def test_native_logs_preserved_for_failed_attempt(tmp_path,monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path/'logs/runtime').mkdir(parents=True)
+    (tmp_path/'logs/runtime/rollout.log').write_text('native fault')
+    episode=tmp_path/'episode';episode.mkdir()
+    module.preserve_runtime_logs(episode)
+    assert (episode/'runtime-logs/rollout.log').read_text()=='native fault'

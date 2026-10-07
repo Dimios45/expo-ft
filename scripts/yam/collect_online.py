@@ -67,10 +67,12 @@ class RPC:
             self.socket=None
 
     def call(self,**message):
+        if os.environ.get('YAM_CONTROL_TOKEN'):
+            message['token'] = os.environ['YAM_CONTROL_TOKEN']
         for attempt in range(3):
             try:
                 if self.socket is None:
-                    self.socket=connect(self.url,compression=None,open_timeout=15,ping_timeout=180,max_size=8*1024*1024)
+                    self.socket=connect(self.url,compression=None,open_timeout=15,max_size=8*1024*1024)
                 self.socket.send(msgpack.packb(message,use_bin_type=True))
                 response=msgpack.unpackb(self.socket.recv(timeout=240),raw=False)
             except (OSError,TimeoutError,ConnectionClosed) as exc:
@@ -117,6 +119,8 @@ def main():
     p.add_argument('--seconds',type=float,default=180)
     p.add_argument('--wait-for-learner',action='store_true',help='Finish queued uploads/training before each new episode')
     p.add_argument('--archive-discarded',action='store_true',help='Preserve and retry only verified zero-episode attempts')
+    p.add_argument('--strict-confirmation',action='store_true',help='Require typing ready at each scene-reset boundary')
+    p.add_argument('--fixed-prompt',action='store_true',help='Confirm the exact experiment task without typing it again')
     p.add_argument('--recorder',type=Path,default=Path(__file__).with_name('record_round-a100.py'))
     p.add_argument('karma_args',nargs=argparse.REMAINDER)
     args=p.parse_args()
@@ -129,6 +133,9 @@ def main():
     rpc=RPC(args.control)
     work=queue.Queue()
     errors=[]
+    notifications=queue.SimpleQueue()
+    def show_notifications():
+        while not notifications.empty(): print(notifications.get(),flush=True)
     uploaded={}
     def worker():
         channel=RPC(args.control)
@@ -151,10 +158,10 @@ def main():
                             time.sleep(3)
                     save(receipt_path,receipt)
                 uploaded[i]=receipt
-                print(f'\nEpisode {i+1}: uploaded and queued for training.',flush=True)
+                notifications.put(f'Episode {i+1}: uploaded and queued for training.')
             except Exception as exc:
                 errors.append(str(exc))
-                print(f'\nUpload stopped: {exc}. Local recording retained.',flush=True)
+                notifications.put(f'Upload stopped: {exc}. Local recording retained.')
             finally:work.task_done()
     thread=threading.Thread(target=worker,daemon=True);thread.start()
     try:
@@ -180,13 +187,22 @@ def main():
                     if all(j['state']=='ready' for j in jobs):break
                     print('Waiting for pending training before starting hardware...',flush=True)
                     time.sleep(5)
-            input(f'\nEpisode {i+1}/{args.episodes}: reset scene, keep stop control ready, press Enter to start: ')
+            show_notifications()
+            status=rpc.call(op='status')
+            if any(j['state']=='failed' for j in status['jobs']):
+                raise RuntimeError('Learner has a failed job; inspect it before starting another episode')
+            if args.strict_confirmation:
+                while input(f'\nEpisode {i+1}/{args.episodes}: reset scene, keep stop ready; type ready to proceed: ').strip().lower() != 'ready':
+                    print('Not started. Type ready only when the scene and operator are ready.',flush=True)
+            else:
+                input(f'\nEpisode {i+1}/{args.episodes}: reset scene, keep stop control ready, press Enter to start: ')
             lease=rpc.call(op='begin_episode',episode=episode)
             print('Recording policy version',lease['health']['policy_version'],flush=True)
             state['episodes'][str(i)]=dict(episode=episode,policy_version=lease['health']['policy_version'],started_at=time.time())
             save(statefile,state)
             command=[sys.executable,str(args.recorder),'--server',args.server,'--out',str(folder),
-                     '--seconds',str(args.seconds),'--auto-upload','--',*extra]
+                     '--seconds',str(args.seconds),'--auto-upload',
+                     *(['--fixed-prompt'] if args.fixed_prompt else []),'--',*extra]
             child=subprocess.Popen(command)
             try:
                 code, interrupted=wait_for_recorder(child)
@@ -195,6 +211,7 @@ def main():
                 if child.poll() is not None:rpc.call(op='end_episode',episode=episode)
             if code or not (folder/'expo_session.json').exists():
                 raise RuntimeError(f'Episode {i+1} not finalized; collection stopped')
+            show_notifications()
             state['episodes'][str(i)]['finished_at']=time.time();save(statefile,state)
             work.put((i,folder))
             if interrupted:
@@ -204,6 +221,7 @@ def main():
                 return
         print('Collection finished. Waiting for remaining uploads and training...',flush=True)
         work.join()
+        show_notifications()
         if errors:raise RuntimeError(errors[0])
         digests={r['sha256'] for r in uploaded.values()}
         while True:

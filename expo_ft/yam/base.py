@@ -39,8 +39,8 @@ def restore_tree(template, blob):
 
 
 class BasePolicy:
-    def __init__(self, checkpoint, tokenizer, mode="frozen", lr=1e-5, patch=None):
-        self.policy = YamJaxPolicy(checkpoint, tokenizer)
+    def __init__(self, checkpoint, tokenizer, mode="frozen", lr=1e-5, patch=None, dtype="float32"):
+        self.policy = YamJaxPolicy(checkpoint, tokenizer, dtype=dtype)
         self.processor = self.policy.processor
         self.graph, self.trainable, self.frozen = nnx.split(
             self.policy.model, expert_filter, ...

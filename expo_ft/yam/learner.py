@@ -118,32 +118,7 @@ class YamEXPO:
     def __init__(self, settings=None, image_size=224):
         settings = settings or Settings()
         self.cfg = c = settings
-        self.encoder = BatchEncoder(
-            partial(ResNetV2Encoder, stage_sizes=c.stages, num_filters=c.filters),
-            c.image_latent,
-        )
-        self.critic = PixelMultiplexer(
-            partial(
-                Ensemble,
-                net_cls=partial(
-                    StateActionValue,
-                    base_cls=partial(
-                        MLP,
-                        hidden_dims=c.hidden,
-                        activate_final=True,
-                        use_layer_norm=True,
-                    ),
-                ),
-                num=c.num_qs,
-            ),
-            c.state_latent,
-            include_state=True,
-        )
-        self.editor = PixelEditMultiplexer(
-            EditorNormal(c.width, c.hidden, c.initial_editor_logstd),
-            c.state_latent,
-            include_state=True,
-        )
+        self._make_modules(c)
         keys = jax.random.split(jax.random.PRNGKey(c.seed), 4)
         image = jnp.zeros((1, image_size, image_size, 9))
         z = jnp.zeros((1, c.image_latent))
@@ -182,6 +157,34 @@ class YamEXPO:
         self.state["target_q"] = self.state["critic"].params
         self._update = jax.jit(self._step)
         self._select = jax.jit(self._selection)
+
+    def _make_modules(self, c):
+        self.encoder = BatchEncoder(
+            partial(ResNetV2Encoder, stage_sizes=c.stages, num_filters=c.filters),
+            c.image_latent,
+        )
+        self.critic = PixelMultiplexer(
+            partial(
+                Ensemble,
+                net_cls=partial(
+                    StateActionValue,
+                    base_cls=partial(
+                        MLP,
+                        hidden_dims=c.hidden,
+                        activate_final=True,
+                        use_layer_norm=True,
+                    ),
+                ),
+                num=c.num_qs,
+            ),
+            c.state_latent,
+            include_state=True,
+        )
+        self.editor = PixelEditMultiplexer(
+            EditorNormal(c.width, c.hidden, c.initial_editor_logstd),
+            c.state_latent,
+            include_state=True,
+        )
 
     def _selection(self, state, images, states, base, key):
         c = self.cfg

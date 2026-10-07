@@ -1,0 +1,7 @@
+# NUC transport/recording and GPU-host LAN services. JAX dependencies remain in
+# requirements-convert.txt / requirements-expo.txt; no GPU packages on the NUC.
+numpy>=1.26,<3
+msgpack>=1,<2
+safetensors>=0.4.5,<1
+Pillow>=10
+websockets~=13.1

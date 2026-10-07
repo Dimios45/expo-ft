@@ -14,7 +14,7 @@ from .rounds import atomic_json, read, sha, validate_version
 
 
 class RoundPolicy:
-    def __init__(self, root):
+    def __init__(self, root, *, checkpoint=None, tokenizer=None):
         self.root = Path(root)
         exp = read(self.root / "experiment.json")
         cur = read(self.root / "current.json")
@@ -31,11 +31,12 @@ class RoundPolicy:
             ):
                 raise ValueError("Version/configuration mismatch")
         self.base = BasePolicy(
-            exp["checkpoint"],
-            exp["tokenizer"],
+            checkpoint or exp["checkpoint"],
+            tokenizer or exp["tokenizer"],
             self.cfg.actor_mode,
             self.cfg.actor_lr,
             version / "actor.msgpack" if version else None,
+            dtype=exp.get("base_dtype", "float32"),
         )
         self.learner = None
         if version:

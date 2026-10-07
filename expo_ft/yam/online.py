@@ -7,6 +7,8 @@ import asyncio
 import hashlib
 import json
 import os
+import signal
+import logging
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
@@ -67,7 +69,9 @@ def extract_archive(archive, destination):
 
 
 class Coordinator:
-    def __init__(self, root, repo):
+    def __init__(self, root, repo, *, policy_url='http://127.0.0.1:8204', microbatch=1, candidate_batch=4):
+        self.policy_url = policy_url.rstrip('/')
+        self.microbatch, self.candidate_batch = microbatch, candidate_batch
         self.root, self.repo = Path(root).resolve(), Path(repo).resolve()
         self.store = self.root/'online'
         self.store.mkdir(exist_ok=True)
@@ -83,9 +87,10 @@ class Coordinator:
             if job['state'] == 'training':
                 job.update(state='failed', error='Worker interrupted; inspect pending checkpoint before retry')
                 atomic_json(path, job)
+                atomic_json(self.status_path, job)
 
     def http(self, path, post=False):
-        request = urllib.request.Request('http://127.0.0.1:8204'+path,
+        request = urllib.request.Request(self.policy_url+path,
                                          data=b'{}' if post else None,
                                          headers={'Content-Type':'application/json'})
         with urllib.request.urlopen(request, timeout=180) as response:
@@ -95,6 +100,9 @@ class Coordinator:
         path = self.store/'queue'/(key+'.json')
         if not path.exists():
             atomic_json(path, dict(dataset=str(dataset), state='queued', created_at=time.time(), prepared=prepared))
+
+    async def prepare_lease(self, health):
+        """Complete deployment-specific validation before persisting a lease."""
 
     async def dispatch(self, m):
         async with self.mutex:
@@ -113,6 +121,7 @@ class Coordinator:
                 # A short boundary pause is allowed; never change weights mid-episode.
                 health = await asyncio.to_thread(self.http, '/online/reload', True)
                 health = await asyncio.to_thread(self.http, '/healthz')
+                await self.prepare_lease(health)
                 lease = dict(episode=episode, health=health, acquired_at=time.time())
                 atomic_json(self.lease_path, lease)
                 self.enabled = True
@@ -190,24 +199,65 @@ class Coordinator:
             atomic_json(path,job)
             atomic_json(self.status_path,job)
             env = dict(os.environ, JAX_PLATFORMS='cuda', XLA_PYTHON_CLIENT_PREALLOCATE='false',
-                       XLA_PYTHON_CLIENT_ALLOCATOR='platform', OMP_NUM_THREADS='4', YAM_CANDIDATE_BATCH='4')
+                       XLA_PYTHON_CLIENT_ALLOCATOR='platform', OMP_NUM_THREADS='4', YAM_CANDIDATE_BATCH=str(self.candidate_batch))
             env.pop('LD_LIBRARY_PATH',None)
-            code = 0
-            for phase in (['train'] if job['prepared'] else ['prepare','train']):
-                args = [sys.executable,'scripts/yam/continue_stable.py',phase,'--root',str(self.root),
-                        '--dataset',job['dataset'],'--reuse-frozen-caches','--allow-older-policy','--microbatch','1']
-                prefix = f'logs/online-{path.stem}-{phase}'
-                command = [sys.executable,'scripts/yam/measure_gpu.py','--output',prefix,'--',*args]
-                with open(self.repo/(prefix+'.log'),'ab') as log:
-                    process = await asyncio.create_subprocess_exec(*command,cwd=self.repo,env=env,stdout=log,stderr=log)
-                    code = await process.wait()
-                if code:
-                    break
-            job.update(state='ready' if code==0 else 'failed',exit_code=code,finished_at=time.time())
-            if code==0:
-                job['candidate_version'] = read(self.root/'current.json')['version']
-            atomic_json(path,job)
-            atomic_json(self.status_path,job)
+            code = -1
+            process = None
+            try:
+                for phase in (['train'] if job['prepared'] else ['prepare','train']):
+                    job['phase'] = phase
+                    atomic_json(path, job); atomic_json(self.status_path, job)
+                    args = [sys.executable,'scripts/yam/continue_stable.py',phase,'--root',str(self.root),
+                            '--dataset',job['dataset'],'--reuse-frozen-caches','--allow-older-policy','--microbatch',str(self.microbatch)]
+                    prefix = f'logs/online-{path.stem}-{phase}'
+                    command = [sys.executable,'scripts/yam/measure_gpu.py','--output',prefix,'--',*args]
+                    (self.repo/'logs').mkdir(exist_ok=True)
+                    with open(self.repo/(prefix+'.log'),'ab') as log:
+                        process = await asyncio.create_subprocess_exec(*command,cwd=self.repo,env=env,
+                            stdout=log,stderr=log,start_new_session=True)
+                        job['worker_pid'] = process.pid
+                        atomic_json(path,job); atomic_json(self.status_path,job)
+                        code = await process.wait()
+                    if code: break
+                job.update(state='ready' if code==0 else 'failed',exit_code=code,finished_at=time.time())
+                if code==0: job['candidate_version'] = read(self.root/'current.json')['version']
+            except asyncio.CancelledError:
+                job.update(state='failed',error='Coordinator stopped during update; inspect pending state before retry',finished_at=time.time())
+                if process is not None:
+                    # This process group was created exclusively for this learner job.
+                    try: os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError: pass
+                    try: await asyncio.wait_for(process.wait(),timeout=10)
+                    except asyncio.TimeoutError:
+                        try: os.killpg(process.pid,signal.SIGKILL)
+                        except ProcessLookupError: pass
+                        await process.wait()
+                raise
+            except Exception as exc:
+                job.update(state='failed',error=str(exc),finished_at=time.time())
+            finally:
+                atomic_json(path,job)
+                atomic_json(self.status_path,job)
+
+
+
+async def handle_connection(ws, dispatch, token=None):
+    import hmac
+    from websockets.exceptions import ConnectionClosed
+    try:
+        async for raw in ws:
+            try:
+                message = msgpack.unpackb(raw,raw=False)
+                if not isinstance(message,dict): raise ValueError('Expected message object')
+                if token is not None and not hmac.compare_digest(str(message.pop('token','')),token):
+                    raise ValueError('Unauthorized')
+                result = await dispatch(message)
+                response = dict(ok=True,result=result)
+            except Exception as exc:
+                response = dict(ok=False,error=str(exc))
+            await ws.send(msgpack.packb(response,use_bin_type=True))
+    except ConnectionClosed:
+        logging.getLogger(__name__).info('Collector disconnected; durable uploads and episode lease retained')
 
 
 async def serve(root, repo, port):
@@ -219,14 +269,7 @@ async def serve(root, repo, port):
     if pending.exists() and read(pending).get('prepared'):
         coordinator.enqueue('seed-'+read(pending)['episode_id'],Path(read(pending)['dataset']),True)
     async def handle(ws):
-        async for raw in ws:
-            try:
-                message = msgpack.unpackb(raw,raw=False)
-                result = await coordinator.dispatch(message)
-                response = dict(ok=True,result=result)
-            except Exception as exc:
-                response = dict(ok=False,error=str(exc))
-            await ws.send(msgpack.packb(response,use_bin_type=True))
+        await handle_connection(ws, coordinator.dispatch)
     async with ws_serve(handle,'127.0.0.1',port,max_size=CHUNK+4096,compression=None):
         print(f'Online collection coordinator listening on {port}',flush=True)
         await coordinator.worker()

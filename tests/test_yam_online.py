@@ -143,3 +143,58 @@ def test_archive_discarded_preserves_files_and_rejects_saved(tmp_path):
     with pytest.raises(RuntimeError,match='saved episodes'):
         module.archive_discarded(folder)
     assert folder.exists()
+
+
+def test_disconnected_client_does_not_crash_handler():
+    from expo_ft.yam.online import handle_connection
+    from websockets.exceptions import ConnectionClosedError
+    class Socket:
+        def __aiter__(self): return self
+        async def __anext__(self): raise ConnectionClosedError(None,None)
+    async def dispatch(message): raise AssertionError('must not dispatch')
+    asyncio.run(handle_connection(Socket(),dispatch))
+
+
+def test_session_sync_failure_does_not_create_lease(tmp_path):
+    c=setup(tmp_path)
+    c.http=lambda *a: {'policy_version':0}
+    async def fail(health): raise OSError('session transfer failed')
+    c.prepare_lease=fail
+    with pytest.raises(OSError): asyncio.run(c.dispatch({'op':'begin_episode','episode':'one'}))
+    assert not c.lease_path.exists()
+
+
+def test_restart_marks_job_and_status_interrupted(tmp_path):
+    c=setup(tmp_path)
+    job=dict(state='training',dataset='test',created_at=1)
+    atomic_json(c.store/'queue/test.json',job);atomic_json(c.status_path,job)
+    restored=Coordinator(c.root,tmp_path)
+    assert json.loads(restored.status_path.read_text())['state']=='failed'
+    assert json.loads((c.store/'queue/test.json').read_text())['state']=='failed'
+
+
+def test_cancelled_worker_stops_its_process_group(tmp_path,monkeypatch):
+    import signal
+    import expo_ft.yam.online as online
+    c=setup(tmp_path);c.enabled=True;c.enqueue('one',tmp_path/'data')
+    ready=asyncio.Event();calls=[]
+    class Process:
+        pid=123456
+        returncode=None
+        async def wait(self):
+            ready.set()
+            if self.returncode is None: await asyncio.Future()
+            return self.returncode
+    proc=Process()
+    async def spawn(*a,**kw):
+        assert kw['start_new_session'];return proc
+    def kill(pid,sig):
+        calls.append((pid,sig));proc.returncode=-sig
+    monkeypatch.setattr(online.asyncio,'create_subprocess_exec',spawn)
+    monkeypatch.setattr(online.os,'killpg',kill)
+    async def run():
+        task=asyncio.create_task(c.worker());await ready.wait();task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+    asyncio.run(run())
+    assert calls==[(123456,signal.SIGTERM)]
+    assert json.loads(c.status_path.read_text())['state']=='failed'

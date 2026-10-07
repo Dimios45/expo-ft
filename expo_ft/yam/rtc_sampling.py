@@ -14,7 +14,16 @@ class RTCSampler:
 
         def sample(state, observation, prefix, noise):
             with jax.default_matmul_precision('highest'):
-                return nnx.merge(self.graph, state).sample_actions_with_prefix(
+                model = nnx.merge(self.graph, state)
+                # With no committed actions, use the ordinary sampler exactly.
+                # Per-token time conditioning changes bf16 rounding even when
+                # every token has the same time. Shape-static dispatch preserves
+                # bootstrap parity without changing the nonzero-delay path.
+                if prefix.shape[1] == 0:
+                    return model.sample_actions(
+                        jax.random.key(0), observation, num_samples=noise.shape[1],
+                        num_steps=10, noise=noise)
+                return model.sample_actions_with_prefix(
                     jax.random.key(0), observation, prefix=prefix,
                     num_samples=noise.shape[1], num_steps=10, noise=noise)
         self._sample = jax.jit(sample)

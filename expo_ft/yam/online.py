@@ -69,7 +69,9 @@ def extract_archive(archive, destination):
 
 
 class Coordinator:
-    def __init__(self, root, repo, *, policy_url='http://127.0.0.1:8204', microbatch=1, candidate_batch=4):
+    def __init__(self, root, repo, *, policy_url='http://127.0.0.1:8204', microbatch=1, candidate_batch=4,
+                 trainer_script='scripts/yam/continue_stable.py'):
+        self.trainer_script = trainer_script
         self.policy_url = policy_url.rstrip('/')
         self.microbatch, self.candidate_batch = microbatch, candidate_batch
         self.root, self.repo = Path(root).resolve(), Path(repo).resolve()
@@ -207,7 +209,7 @@ class Coordinator:
                 for phase in (['train'] if job['prepared'] else ['prepare','train']):
                     job['phase'] = phase
                     atomic_json(path, job); atomic_json(self.status_path, job)
-                    args = [sys.executable,'scripts/yam/continue_stable.py',phase,'--root',str(self.root),
+                    args = [sys.executable,self.trainer_script,phase,'--root',str(self.root),
                             '--dataset',job['dataset'],'--reuse-frozen-caches','--allow-older-policy','--microbatch',str(self.microbatch)]
                     prefix = f'logs/online-{path.stem}-{phase}'
                     command = [sys.executable,'scripts/yam/measure_gpu.py','--output',prefix,'--',*args]

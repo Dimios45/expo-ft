@@ -1,0 +1,76 @@
+{
+  "torch": "2.11.0+cu128",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "hardware_control": false,
+  "input": "First saved frame of /home/sra/yam-online-lan/lan-five-20261007-001/learner/online/episodes/030438602f812308d7d33a269bf1a39e7fc80ecfcb910a1fe4bd156477e30076",
+  "load_seconds": 101.5296180259902,
+  "prefix_max_abs_difference": 0.0,
+  "base": [
+    {
+      "candidates": 1,
+      "cached_prefix": false,
+      "candidate_batch": 1,
+      "seconds": 0.3162968100514263,
+      "peak_allocated_gib": 12.065584659576416,
+      "peak_reserved_gib": 13.015625
+    },
+    {
+      "candidates": 8,
+      "cached_prefix": false,
+      "candidate_batch": 1,
+      "seconds": 2.4383381289662793,
+      "peak_allocated_gib": 12.065588474273682,
+      "peak_reserved_gib": 13.015625
+    },
+    {
+      "candidates": 8,
+      "cached_prefix": true,
+      "candidate_batch": 1,
+      "seconds": 1.923881834023632,
+      "peak_allocated_gib": 12.065584659576416,
+      "peak_reserved_gib": 13.015625
+    },
+    {
+      "candidates": 8,
+      "cached_prefix": true,
+      "candidate_batch": 1,
+      "seconds": 1.9249927460914478,
+      "peak_allocated_gib": 12.065584659576416,
+      "peak_reserved_gib": 13.015625
+    },
+    {
+      "candidates": 8,
+      "cached_prefix": true,
+      "candidate_batch": 8,
+      "seconds": 0.37360210600309074,
+      "peak_allocated_gib": 12.831624984741211,
+      "peak_reserved_gib": 13.05078125
+    },
+    {
+      "candidates": 8,
+      "cached_prefix": true,
+      "candidate_batch": 8,
+      "seconds": 0.31592958699911833,
+      "peak_allocated_gib": 12.857086181640625,
+      "peak_reserved_gib": 13.05078125
+    }
+  ],
+  "reference_normalized_parity": true,
+  "selector_seconds": 0.10860509308986366,
+  "base_plus_selector_peak_gib": 12.857086181640625,
+  "policy_payload_mb": 170.191876,
+  "critic_batch8_with_terminal_seconds": 0.337063207058236,
+  "editor_batch8_seconds": 0.05099975096527487,
+  "training_peak_allocated_gib": 0.7431368827819824,
+  "training_metrics": {
+    "critic_loss": 1.266735190525651,
+    "target_mean": 1.25,
+    "q_mean": 0.04818786549731158,
+    "critic_grad_norm": 83.68254852294922,
+    "editor_loss": 4.975066661834717,
+    "entropy_unscaled": -562.5824813842773,
+    "edit_abs_mean": 0.0017406937258783728,
+    "editor_grad_norm": 2.14147686958313,
+    "temperature": 0.010000099427998066
+  }
+}

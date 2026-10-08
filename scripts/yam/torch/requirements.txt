@@ -1,0 +1,13 @@
+# Separate from pyproject.toml's JAX/openpi dependency graph.
+# Install the pinned LeRobot checkout with its [molmoact2] extra first.
+transformers==5.5.4
+peft>=0.18,<0.20
+scipy>=1.14,<2
+fastapi>=0.115
+uvicorn>=0.30
+json-numpy>=2
+msgpack>=1,<2
+websockets~=13.1
+pytest>=8
+av>=14
+pyarrow>=18

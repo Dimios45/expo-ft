@@ -33,6 +33,8 @@ def dataset_to_wire(x, frame):
 
 
 def normalize_action(processor, a):
+    if hasattr(processor, "normalize_actions"):
+        return processor.normalize_actions(a)
     lo = processor.output_stats["action.q01"]
     hi = processor.output_stats["action.q99"]
     denom = np.where(hi == lo, processor.eps, hi - lo)
@@ -180,35 +182,29 @@ def import_episode(dataset, dest, processor, experiment, current, *, hitl_prior=
         decoded = decode_selected(path, absolute)
         views[role] = [decoded[int(i)] for i in absolute]
         video_paths.append(path)
-    prepared = [
-        processor.prepare_numpy(
-            {k: v[i] for k, v in views.items()}, raw_s[f], experiment["prompt"]
+    if hasattr(processor, "prepare_replay"):
+        arrays = processor.prepare_replay(views, raw_s[anchors], experiment["prompt"])
+    else:
+        arrays = prepare_jax_arrays(
+            processor, views, raw_s, anchors, experiment["prompt"]
         )
-        for i, f in enumerate(anchors)
-    ]
-    from expo_ft.conversion.yam_pi05 import JAX_CAMERAS
-
-    arrays = {
-        "images": np.stack(
-            [np.concatenate([d[k][0] for k in JAX_CAMERAS], axis=-1) for d in prepared]
-        ),
-        "state": np.concatenate([d["state"] for d in prepared]),
-        "tokens": np.concatenate([d["tokenized_prompt"] for d in prepared]),
-        "token_mask": np.concatenate([d["tokenized_prompt_mask"] for d in prepared]),
-        "actions": np.stack(
-            [normalize_action(processor, raw_a[i : i + 30]) for i in starts]
-        ),
-        "current": np.array([index[v] for v in starts]),
-        "next": np.array([index[v] for v in ends]),
-        "rewards": np.where(
-            ends == len(rows) - 1,
-            session["reward"] * experiment["settings"]["discount"] ** 29,
-            0,
-        ).astype(np.float32),
-        "masks": np.where(
-            (ends == len(rows) - 1) & (session["terminal"] != "truncated"), 0, 1
-        ).astype(np.float32),
-    }
+    arrays.update(
+        {
+            "actions": np.stack(
+                [normalize_action(processor, raw_a[i : i + 30]) for i in starts]
+            ),
+            "current": np.array([index[i] for i in starts]),
+            "next": np.array([index[i] for i in ends]),
+            "rewards": np.where(
+                ends == len(rows) - 1,
+                session["reward"] * experiment["settings"]["discount"] ** 29,
+                0,
+            ).astype(np.float32),
+            "masks": np.where(
+                (ends == len(rows) - 1) & (session["terminal"] != "truncated"), 0, 1
+            ).astype(np.float32),
+        }
+    )
     if intervention is not None:
         arrays["intervention"] = np.stack([intervention[i : i + 30] for i in starts])
     provenance = {
@@ -252,6 +248,24 @@ def import_episode(dataset, dest, processor, experiment, current, *, hitl_prior=
         },
     )
     return eid
+
+
+def prepare_jax_arrays(processor, views, raw_s, anchors, prompt):
+    prepared = [
+        processor.prepare_numpy({k: v[i] for k, v in views.items()}, raw_s[f], prompt)
+        for i, f in enumerate(anchors)
+    ]
+    from expo_ft.conversion.yam_pi05 import JAX_CAMERAS
+
+    arrays = {
+        "images": np.stack(
+            [np.concatenate([d[k][0] for k in JAX_CAMERAS], axis=-1) for d in prepared]
+        ),
+        "state": np.concatenate([d["state"] for d in prepared]),
+        "tokens": np.concatenate([d["tokenized_prompt"] for d in prepared]),
+        "token_mask": np.concatenate([d["tokenized_prompt_mask"] for d in prepared]),
+    }
+    return arrays
 
 
 class Episode:
